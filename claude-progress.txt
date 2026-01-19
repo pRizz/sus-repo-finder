@@ -78,3 +78,38 @@
 - Dashboard server is functional and ready for further feature development
 - Templates need to be implemented (currently returning placeholder text)
 - Database queries need to be wired up in API handlers
+
+## Session: 2026-01-19 (Agent #2 - Feature #2)
+
+### Feature #2: SQLite database initializes with schema
+**Status: PASSING**
+
+#### What was done:
+- Created SQL schema file: `sus-core/migrations/001_initial_schema.sql`
+- All 6 tables defined per spec: crates, versions, analysis_results, crawler_state, crawler_errors, crawler_queue
+- Added appropriate indexes for performance
+- Implemented `Database::init_schema()` method that executes the SQL schema
+- Implemented `Database::new_with_init()` for one-step database creation with initialization
+- Implemented `Database::is_initialized()` to check if schema exists
+- Added 4 unit tests for database initialization:
+  - `test_database_init_schema` - verifies schema creates tables
+  - `test_database_init_schema_idempotent` - verifies multiple calls are safe
+  - `test_database_new_with_init` - verifies combined init method
+  - `test_database_all_tables_created` - verifies all 6 tables exist
+
+#### Technical details:
+- Used `include_str!()` macro to embed SQL schema at compile time
+- Split SQL by semicolon and filter comments (lines starting with --)
+- Schema uses `CREATE TABLE IF NOT EXISTS` for idempotency
+- In-memory SQLite (`sqlite::memory:`) used for testing
+
+#### Pre-commit checks passed:
+- `cargo fmt --all` - code formatted
+- `cargo clippy --all-targets -- -D warnings` - no clippy warnings
+- `cargo build --all-targets` - builds successfully
+- `cargo test --all` - all 4 tests pass
+
+#### Current Completion Status:
+- Features passing: 2/170 (1.2%)
+- Feature #1 (Cargo workspace initializes without errors) - PASSING
+- Feature #2 (SQLite database initializes with schema) - PASSING
