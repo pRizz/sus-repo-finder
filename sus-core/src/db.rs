@@ -47,8 +47,15 @@ impl Database {
         // Split schema into individual statements and execute them
         // SQLite doesn't support multiple statements in a single query
         for statement in INIT_SCHEMA.split(';') {
-            let trimmed = statement.trim();
-            if !trimmed.is_empty() && !trimmed.starts_with("--") {
+            // Remove SQL comments (lines starting with --)
+            let cleaned: String = statement
+                .lines()
+                .filter(|line| !line.trim().starts_with("--"))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let trimmed = cleaned.trim();
+            if !trimmed.is_empty() {
                 sqlx::query(trimmed).execute(&self.pool).await?;
             }
         }
@@ -61,11 +68,10 @@ impl Database {
     ///
     /// Returns true if the core tables exist.
     pub async fn is_initialized(&self) -> Result<bool, sqlx::Error> {
-        let result: Option<(i32,)> = sqlx::query_as(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='crates'"
-        )
-        .fetch_optional(&self.pool)
-        .await?;
+        let result: Option<(i32,)> =
+            sqlx::query_as("SELECT 1 FROM sqlite_master WHERE type='table' AND name='crates'")
+                .fetch_optional(&self.pool)
+                .await?;
 
         Ok(result.is_some())
     }
@@ -84,30 +90,49 @@ mod tests {
     #[tokio::test]
     async fn test_database_init_schema() {
         // Create an in-memory database for testing
-        let db = Database::new("sqlite::memory:").await.expect("Failed to create database");
+        let db = Database::new("sqlite::memory:")
+            .await
+            .expect("Failed to create database");
 
         // Initially the database should not be initialized
-        let initialized_before = db.is_initialized().await.expect("Failed to check initialization");
-        assert!(!initialized_before, "Database should not be initialized before init_schema");
+        let initialized_before = db
+            .is_initialized()
+            .await
+            .expect("Failed to check initialization");
+        assert!(
+            !initialized_before,
+            "Database should not be initialized before init_schema"
+        );
 
         // Initialize the schema
         db.init_schema().await.expect("Failed to initialize schema");
 
         // Now the database should be initialized
-        let initialized_after = db.is_initialized().await.expect("Failed to check initialization");
-        assert!(initialized_after, "Database should be initialized after init_schema");
+        let initialized_after = db
+            .is_initialized()
+            .await
+            .expect("Failed to check initialization");
+        assert!(
+            initialized_after,
+            "Database should be initialized after init_schema"
+        );
     }
 
     /// Test that init_schema is idempotent (can be called multiple times)
     #[tokio::test]
     async fn test_database_init_schema_idempotent() {
-        let db = Database::new("sqlite::memory:").await.expect("Failed to create database");
+        let db = Database::new("sqlite::memory:")
+            .await
+            .expect("Failed to create database");
 
         // Initialize twice - should not fail
         db.init_schema().await.expect("First init failed");
         db.init_schema().await.expect("Second init failed");
 
-        let initialized = db.is_initialized().await.expect("Failed to check initialization");
+        let initialized = db
+            .is_initialized()
+            .await
+            .expect("Failed to check initialization");
         assert!(initialized, "Database should be initialized");
     }
 
@@ -118,7 +143,10 @@ mod tests {
             .await
             .expect("Failed to create and initialize database");
 
-        let initialized = db.is_initialized().await.expect("Failed to check initialization");
+        let initialized = db
+            .is_initialized()
+            .await
+            .expect("Failed to check initialization");
         assert!(initialized, "Database should be initialized");
     }
 
@@ -139,13 +167,12 @@ mod tests {
         ];
 
         for table_name in expected_tables {
-            let result: Option<(i32,)> = sqlx::query_as(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?"
-            )
-            .bind(table_name)
-            .fetch_optional(db.pool())
-            .await
-            .expect("Failed to query table existence");
+            let result: Option<(i32,)> =
+                sqlx::query_as("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
+                    .bind(table_name)
+                    .fetch_optional(db.pool())
+                    .await
+                    .expect("Failed to query table existence");
 
             assert!(result.is_some(), "Table '{}' should exist", table_name);
         }

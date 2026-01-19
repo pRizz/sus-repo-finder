@@ -1,11 +1,13 @@
 //! API routes for the dashboard
 
-use axum::{Router, routing::get};
-use sus_core::Database;
+use axum::{routing::get, Router};
 use std::sync::Arc;
+use sus_core::Database;
 
 /// Application state shared across handlers
 pub struct AppState {
+    /// Database connection - will be used once API handlers are implemented
+    #[allow(dead_code)]
     pub db: Database,
 }
 
@@ -17,14 +19,17 @@ pub fn create_router(db: Database) -> Router {
         // Pages
         .route("/", get(index))
         .route("/crates", get(crate_list))
-        .route("/crates/:name", get(crate_detail))
-        .route("/crates/:name/compare", get(crate_compare))
+        .route("/crates/{name}", get(crate_detail))
+        .route("/crates/{name}/compare", get(crate_compare))
         // API
         .route("/api/stats", get(stats))
         .route("/api/crates", get(api_crates))
-        .route("/api/crates/:name", get(api_crate_detail))
-        .route("/api/crates/:name/versions/:version", get(api_version_detail))
-        .route("/api/crates/:name/compare", get(api_compare))
+        .route("/api/crates/{name}", get(api_crate_detail))
+        .route(
+            "/api/crates/{name}/versions/{version}",
+            get(api_version_detail),
+        )
+        .route("/api/crates/{name}/compare", get(api_compare))
         .route("/api/findings/recent", get(api_recent_findings))
         .route("/api/findings/interesting", get(api_interesting))
         .with_state(state)

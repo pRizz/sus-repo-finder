@@ -1,11 +1,13 @@
 //! API routes for the crawler web portal
 
-use axum::{Router, routing::get};
-use sus_core::Database;
+use axum::{routing::get, Router};
 use std::sync::Arc;
+use sus_core::Database;
 
 /// Application state shared across handlers
 pub struct AppState {
+    /// Database connection - will be used once API handlers are implemented
+    #[allow(dead_code)]
     pub db: Database,
 }
 

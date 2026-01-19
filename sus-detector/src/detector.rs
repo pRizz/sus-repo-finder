@@ -1,7 +1,9 @@
 //! Main detector implementation
 
-use sus_core::{IssueType, Severity};
 use crate::patterns::Finding;
+// These types will be used when pattern detection is implemented
+#[allow(unused_imports)]
+use sus_core::{IssueType, Severity};
 
 /// The main pattern detector
 pub struct Detector {

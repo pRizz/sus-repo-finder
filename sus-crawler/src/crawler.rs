@@ -3,10 +3,12 @@
 use anyhow::Result;
 
 /// The main crawler struct
+#[allow(dead_code)]
 pub struct Crawler {
     // Configuration and state will be added here
 }
 
+#[allow(dead_code)]
 impl Crawler {
     /// Create a new crawler instance
     pub fn new() -> Self {
