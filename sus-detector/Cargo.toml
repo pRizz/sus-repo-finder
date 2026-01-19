@@ -1,0 +1,15 @@
+[package]
+name = "sus-detector"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+sus-core = { path = "../sus-core" }
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

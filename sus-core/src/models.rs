@@ -1,0 +1,89 @@
+//! Database models for Sus Repo Finder
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+
+/// A crate from crates.io
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Crate {
+    pub id: i64,
+    pub name: String,
+    pub repo_url: Option<String>,
+    pub description: Option<String>,
+    pub download_count: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// A version of a crate
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Version {
+    pub id: i64,
+    pub crate_id: i64,
+    pub version_number: String,
+    pub release_date: Option<DateTime<Utc>>,
+    pub last_analyzed: Option<DateTime<Utc>>,
+    pub analysis_status: String,
+    pub has_build_rs: bool,
+    pub is_proc_macro: bool,
+}
+
+/// An analysis result (finding)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalysisResult {
+    pub id: i64,
+    pub version_id: i64,
+    pub issue_type: String,
+    pub severity: String,
+    pub file_path: String,
+    pub line_start: Option<i32>,
+    pub line_end: Option<i32>,
+    pub code_snippet: Option<String>,
+    pub context_before: Option<String>,
+    pub context_after: Option<String>,
+    pub summary: Option<String>,
+    pub details: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Crawler state for checkpointing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrawlerState {
+    pub id: i64,
+    pub run_id: String,
+    pub status: String,
+    pub started_at: DateTime<Utc>,
+    pub last_checkpoint: Option<DateTime<Utc>>,
+    pub crates_processed: i32,
+    pub crates_total: i32,
+    pub current_crate: Option<String>,
+    pub queue_position: i32,
+    pub errors_count: i32,
+    pub findings_count: i32,
+}
+
+/// Crawler error record
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrawlerError {
+    pub id: i64,
+    pub run_id: String,
+    pub crate_name: Option<String>,
+    pub version: Option<String>,
+    pub error_type: Option<String>,
+    pub error_message: Option<String>,
+    pub occurred_at: DateTime<Utc>,
+    pub retry_count: i32,
+}
+
+/// Crawler queue item
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueItem {
+    pub id: i64,
+    pub crate_name: String,
+    pub version: String,
+    pub priority: i32,
+    pub status: String,
+    pub added_at: DateTime<Utc>,
+    pub started_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
