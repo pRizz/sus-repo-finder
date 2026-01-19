@@ -1,7 +1,7 @@
 //! Pattern definitions and finding structures
 
-use sus_core::{IssueType, Severity};
 use serde::{Deserialize, Serialize};
+use sus_core::{IssueType, Severity};
 
 /// A detected suspicious pattern
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,7 +58,12 @@ impl Finding {
 }
 
 /// Extract code snippet with context from source
-pub fn extract_snippet(source: &str, line_start: usize, line_end: usize, context_lines: usize) -> (String, String, String) {
+pub fn extract_snippet(
+    source: &str,
+    line_start: usize,
+    line_end: usize,
+    context_lines: usize,
+) -> (String, String, String) {
     let lines: Vec<&str> = source.lines().collect();
     let total_lines = lines.len();
 
