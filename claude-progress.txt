@@ -1,0 +1,41 @@
+# Sus Repo Finder - Progress Notes
+
+## Session: 2025-01-19
+
+### Feature #1: Cargo workspace initializes without errors
+**Status: PASSING**
+
+#### What was done:
+- Fixed askama dependency issue - downgraded from 0.13 (with incompatible `with-axum` feature) to 0.12
+- Verified the entire workspace compiles successfully
+- All 4 crates compile: sus-core, sus-detector, sus-crawler, sus-dashboard
+
+#### Changes made:
+1. Updated Cargo.toml to use `askama = "0.12"` instead of `askama = "0.13"` with `with-axum` feature
+2. Removed `askama_axum` from workspace dependencies (not needed for 0.12)
+
+#### Build result:
+- `./init.sh` completes successfully
+- All targets compile (with expected warnings for unused code that will be implemented later)
+- Database schema initialization works
+
+### Current Completion Status:
+- Features passing: 1/170 (0.6%)
+- Feature #1 (Cargo workspace initializes without errors) - PASSING
+
+### Notes for next session:
+- The workspace structure is solid with 4 crates properly configured
+- sus-core has database connection pooling and schema initialization
+- sus-detector has pattern detection scaffolding (TODO implementations)
+- sus-crawler has web portal routes set up
+- sus-dashboard has dashboard routes set up
+- Next priority features to work on:
+  - Feature #2: SQLite database initializes with schema
+  - Feature #3: sus-core crate exports shared types
+  - Feature #4: Dashboard server starts on configured port
+  - Feature #5: Crawler server starts on configured port
+
+### Warnings to address later:
+- Unused imports in sus-detector/src/detector.rs (IssueType, Severity)
+- Unused db field in sus-crawler and sus-dashboard AppState structs
+- Unused Crawler struct and methods in sus-crawler
