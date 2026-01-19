@@ -39,3 +39,42 @@
 - Unused imports in sus-detector/src/detector.rs (IssueType, Severity)
 - Unused db field in sus-crawler and sus-dashboard AppState structs
 - Unused Crawler struct and methods in sus-crawler
+
+[Testing] 2026-01-19 17:56:19 - Regression test for Feature #1 (Cargo workspace initializes without errors)
+  - Ran ./init.sh successfully
+  - All 4 crates compiled: sus-core, sus-detector, sus-crawler, sus-dashboard
+  - Only warnings (dead_code) - no compilation errors
+  - Feature still PASSING ✅
+
+### Feature #4: Dashboard server starts on configured port
+**Status: PASSING**
+
+#### What was done:
+- Fixed Axum 0.8 route syntax (`:name` → `{name}` for path parameters)
+- Verified server starts successfully on configured port (DASHBOARD_PORT env var)
+- Verified server responds to HTTP requests
+- Tested with browser automation
+
+#### Steps verified:
+1. ✅ Build sus-dashboard - compiled successfully
+2. ✅ Start server - starts with DATABASE_URL and DASHBOARD_PORT env vars
+3. ✅ Verify server responds to HTTP requests - homepage returns content
+4. ✅ Verify correct port binding - listening on http://localhost:3002
+
+#### Changes made:
+1. Updated sus-dashboard/src/api.rs to use Axum 0.8 route syntax (`{name}` instead of `:name`)
+
+#### Test evidence:
+- curl http://localhost:3002/ returns "Sus Dashboard - Landing Page (TODO: implement template)"
+- curl http://localhost:3002/api/stats returns valid JSON
+- Server logs show: "Dashboard listening on http://localhost:3002"
+- Screenshots saved in .playwright-mcp/ directory
+
+### Current Completion Status:
+- Features passing: 1/170 → now counting Feature #4 as passing
+- Feature #4 marked as passing in feature database
+
+### Notes for next session:
+- Dashboard server is functional and ready for further feature development
+- Templates need to be implemented (currently returning placeholder text)
+- Database queries need to be wired up in API handlers
