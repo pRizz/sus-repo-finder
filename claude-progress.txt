@@ -113,3 +113,40 @@
 - Features passing: 2/170 (1.2%)
 - Feature #1 (Cargo workspace initializes without errors) - PASSING
 - Feature #2 (SQLite database initializes with schema) - PASSING
+
+## Session: 2026-01-19 (Agent #5 - Feature #5)
+
+### Feature #5: Crawler server starts on configured port
+**Status: PASSING**
+
+#### What was done:
+- Verified the crawler server starts successfully on configured port (CRAWLER_PORT env var)
+- Created `run-crawler.sh` helper script for easier startup
+- Verified server responds to HTTP requests on all routes
+- Tested with browser automation
+
+#### Steps verified:
+1. ✅ Build sus-crawler - compiled successfully via ./init.sh
+2. ✅ Start server - starts with DATABASE_URL and CRAWLER_PORT env vars
+3. ✅ Verify server responds to HTTP requests - all routes return content
+4. ✅ Verify correct port binding - listening on http://localhost:3001
+
+#### Routes tested:
+- GET / - returns "Crawler Portal - Status Page"
+- GET /detailed - returns "Crawler Portal - Detailed View"
+- GET /errors - returns "Crawler Portal - Errors Page"
+- GET /api/crawler/status - returns JSON: {"status": "idle", "current_crate": null}
+- GET /api/crawler/stats - returns JSON: {"crates_scanned": 0, "findings_count": 0, "errors_count": 0}
+
+#### Test evidence:
+- curl http://localhost:3001/ returns content successfully
+- curl http://localhost:3001/api/crawler/status returns valid JSON
+- Server logs show: "Crawler portal listening on http://localhost:3001"
+- Screenshots saved in .playwright-mcp/ directory
+
+#### Files created:
+- `run-crawler.sh` - helper script to start crawler with proper env vars
+
+### Current Completion Status:
+- Features passing: 2/170 → Feature #5 now also passing
+- Feature #5 (Crawler server starts on configured port) - PASSING
