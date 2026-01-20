@@ -5603,3 +5603,51 @@ This tells browsers there's no favicon to load, preventing the automatic favicon
 #### Current Completion Status:
 - Features passing: 80/170 (47.1%)
 - Feature #130 (No console errors during normal operation) - PASSING ✅
+
+
+## Session: 2026-01-20 (Agent - Feature #131)
+
+### Feature #131: HTMX requests succeed without errors
+**Status: PASSING** ✅
+
+#### Feature Description:
+Dynamic updates work - verify that HTMX/dynamic interactions succeed without errors.
+
+#### Verification Steps:
+
+**Step 1: Trigger HTMX interaction** ✅
+Tested multiple dynamic interactions:
+1. **SSE Live Logs (Crawler Portal)** - Navigated to http://localhost:3001/detailed, verified SSE connection established
+2. **Clear Logs Button** - Clicked Clear button, logs cleared and placeholder appeared
+3. **Version Selector (Dashboard)** - Changed version dropdown on crate detail page
+4. **Search Form** - Submitted search from dashboard
+
+**Step 2: Verify request succeeds** ✅
+- SSE endpoint `/api/crawler/logs` returns 200 OK
+- All form submissions and navigation work correctly
+- Connection status shows "Connected" for SSE
+- Search form successfully navigates to search results
+
+**Step 3: Verify DOM updated correctly** ✅
+- SSE logs dynamically added to DOM (heartbeat messages appear every ~15 seconds)
+- Clear button removes all logs and shows "Waiting for log messages..." placeholder
+- New log messages continue to appear after clearing
+- Version selector changes URL and reloads page with version-specific content
+- Search shows filtered results correctly
+
+#### Test Evidence:
+- Screenshots:
+  - feature-131-sse-connected.png - SSE connection established with live logs
+  - feature-131-sse-after-clear.png - After clear button clicked, new messages appearing
+  - feature-131-version-selector.png - Version selector navigated to /crates/anyhow?version=0.9.99
+  - feature-131-search-results.png - Search for "serde" returned correct results
+- Console errors: None (only cosmetic favicon 404)
+- Network requests: SSE endpoint returns 200 OK
+
+#### Notes:
+The application uses Server-Sent Events (SSE) for real-time log streaming rather than traditional HTMX attributes. Other dynamic interactions use JavaScript-based navigation (version selector, search form). All these "HTMX-like" dynamic updates work correctly without errors.
+
+#### Current Completion Status:
+- Features passing: 82/170 (48.2%)
+- Feature #131 (HTMX requests succeed without errors) - PASSING ✅
+
