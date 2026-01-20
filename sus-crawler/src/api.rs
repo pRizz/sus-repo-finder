@@ -78,6 +78,8 @@ pub fn create_router(db: Database) -> Router {
         .route("/api/crawler/test-download/{name}/{version}", get(test_download))
         // Crawl and store endpoint: fetches from crates.io and stores in database
         .route("/api/crawler/crawl-and-store/{name}", axum::routing::post(crawl_and_store))
+        // Add a version to an existing crate (for testing)
+        .route("/api/crawler/add-version", axum::routing::post(add_version))
         // Get stored crate endpoint: retrieves a crate from the database
         .route("/api/crawler/stored-crate/{name}", get(get_stored_crate))
         // Store an analysis result (finding) in the database
@@ -401,6 +403,87 @@ async fn get_stored_crate(
         )
             .into_response(),
     }
+}
+
+/// Request body for adding a version
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddVersionRequest {
+    /// Crate name (must already exist in the database)
+    pub crate_name: String,
+    /// Version number to add
+    pub version: String,
+    /// Whether this version has a build.rs (optional, defaults to false)
+    pub has_build_rs: Option<bool>,
+    /// Whether this is a proc-macro crate (optional, defaults to false)
+    pub is_proc_macro: Option<bool>,
+}
+
+/// Add a version to an existing crate (for testing)
+/// POST /api/crawler/add-version
+///
+/// This endpoint adds a version to an existing crate without downloading from crates.io.
+/// Useful for testing version comparison features.
+async fn add_version(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Json(request): axum::extract::Json<AddVersionRequest>,
+) -> impl IntoResponse {
+    // Step 1: Look up the crate by name
+    let crate_info = match state.db.get_crate_by_name(&request.crate_name).await {
+        Ok(Some(info)) => info,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "success": false,
+                    "error": format!("Crate '{}' not found. Use crawl-and-store first.", request.crate_name)
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": format!("Database error: {}", e)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Step 2: Add the version
+    let has_build_rs = request.has_build_rs.unwrap_or(false);
+    let is_proc_macro = request.is_proc_macro.unwrap_or(false);
+
+    let version_id = match state
+        .db
+        .upsert_version(crate_info.id, &request.version, has_build_rs, is_proc_macro)
+        .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": format!("Failed to add version: {}", e)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    Json(json!({
+        "success": true,
+        "crate_id": crate_info.id,
+        "version_id": version_id,
+        "crate_name": request.crate_name,
+        "version": request.version,
+        "has_build_rs": has_build_rs,
+        "is_proc_macro": is_proc_macro
+    }))
+    .into_response()
 }
 
 /// Request body for storing an analysis result
