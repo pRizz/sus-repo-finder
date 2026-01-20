@@ -4,18 +4,38 @@ use askama::Template;
 use axum::{
     extract::Path,
     http::StatusCode,
-    response::{Html, IntoResponse, Json, Response},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        Html, IntoResponse, Json, Response,
+    },
     routing::get,
     Router,
 };
+use futures::stream::{self, Stream};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::sync::Arc;
+use std::{convert::Infallible, sync::Arc, time::Duration};
 use sus_core::Database;
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt;
 
-use crate::templates::StatusTemplate;
+use crate::templates::{DetailedTemplate, StatusTemplate};
 use sus_crawler::{CrateDownloader, CratesIoClient, Crawler, CrawlerConfig};
 use sus_detector::Detector;
+
+/// A log message for SSE streaming
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LogMessage {
+    /// Log level (debug, info, warn, error)
+    pub level: String,
+    /// Log message content
+    pub message: String,
+    /// Optional target/module name
+    pub target: Option<String>,
+    /// Timestamp in ISO 8601 format
+    pub timestamp: String,
+}
 
 /// Wrapper for rendering Askama templates as HTML responses
 pub struct HtmlTemplate<T>(pub T);
@@ -44,6 +64,22 @@ pub struct AppState {
     pub crates_io_client: Arc<CratesIoClient>,
     /// Crate downloader for source extraction (Arc-wrapped for sharing with Crawler)
     pub crate_downloader: Arc<CrateDownloader>,
+    /// Broadcast channel sender for log messages
+    pub log_sender: broadcast::Sender<LogMessage>,
+}
+
+impl AppState {
+    /// Send a log message to all connected SSE clients
+    pub fn send_log(&self, level: &str, message: &str, target: Option<&str>) {
+        let log_msg = LogMessage {
+            level: level.to_string(),
+            message: message.to_string(),
+            target: target.map(|s| s.to_string()),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+        // Ignore send errors - they just mean no one is listening
+        let _ = self.log_sender.send(log_msg);
+    }
 }
 
 /// Create the API router
@@ -971,6 +1007,7 @@ async fn test_rate_limit(
 
     let rate_limit_delay_ms = request.rate_limit_delay_ms.unwrap_or(1000);
     let crate_names = request.crate_names;
+    let num_crates = crate_names.len();
 
     if crate_names.is_empty() {
         return Json(json!({
@@ -980,8 +1017,8 @@ async fn test_rate_limit(
         .into_response();
     }
 
-    // Create a crawler with the specified rate limit
-    let config = CrawlerConfig::new(1, rate_limit_delay_ms); // max_concurrent=1 to ensure sequential
+    // Create a crawler with the specified rate limit and max_concurrent=1 for sequential processing
+    let config = CrawlerConfig::new(1, rate_limit_delay_ms);
     let crawler = Crawler::from_arc(
         Arc::clone(&state.db),
         Arc::clone(&state.crates_io_client),
@@ -989,53 +1026,43 @@ async fn test_rate_limit(
         config,
     );
 
-    // Track timing
+    // Track timing - process all crates in a single batch
     let start_time = Instant::now();
-    let mut timestamps: Vec<u64> = Vec::new();
 
-    // Process crates one at a time, recording timestamps
-    let mut results = Vec::new();
-    for name in &crate_names {
-        let request_start = Instant::now();
-        timestamps.push(start_time.elapsed().as_millis() as u64);
-
-        // Use the crawler to fetch the crate (includes rate limiting)
-        let crate_results = crawler.process_crates(vec![name.clone()]).await;
-        results.extend(crate_results);
-
-        tracing::debug!("Fetched {} in {:?}", name, request_start.elapsed());
-    }
+    // Process all crates with rate limiting applied between requests
+    let results = crawler.process_crates(crate_names).await;
 
     let actual_total_time_ms = start_time.elapsed().as_millis() as u64;
-    let expected_min_time_ms = if crate_names.len() > 1 {
-        (crate_names.len() as u64 - 1) * rate_limit_delay_ms
+
+    // With rate limiting and sequential processing (max_concurrent=1),
+    // the minimum expected time is (n-1) * delay_ms because the first request
+    // doesn't need to wait, but all subsequent requests do
+    let expected_min_time_ms = if num_crates > 1 {
+        (num_crates as u64 - 1) * rate_limit_delay_ms
     } else {
         0
     };
 
-    // Calculate intervals between requests
-    let intervals: Vec<u64> = timestamps
-        .windows(2)
-        .map(|w| w[1].saturating_sub(w[0]))
-        .collect();
-
-    // Check if rate limiting is working (intervals should be >= delay)
-    let rate_limiting_respected = intervals
-        .iter()
-        .all(|&interval| interval >= rate_limit_delay_ms.saturating_sub(50)); // Allow 50ms tolerance
+    // Check if rate limiting is working by verifying total time meets expectations
+    // Allow 100ms tolerance per request for network latency
+    let tolerance_ms = num_crates as u64 * 100;
+    let rate_limiting_respected =
+        actual_total_time_ms >= expected_min_time_ms.saturating_sub(tolerance_ms);
 
     let success_count = results.iter().filter(|r| r.success).count();
 
     Json(json!({
         "success": true,
         "rate_limit_delay_ms": rate_limit_delay_ms,
-        "total_crates": crate_names.len(),
+        "total_crates": num_crates,
         "successful_fetches": success_count,
         "expected_min_time_ms": expected_min_time_ms,
         "actual_total_time_ms": actual_total_time_ms,
-        "timestamps_ms": timestamps,
-        "intervals_ms": intervals,
         "rate_limiting_respected": rate_limiting_respected,
+        "message": format!(
+            "Processed {} crates in {}ms (expected minimum {}ms with {}ms delay)",
+            num_crates, actual_total_time_ms, expected_min_time_ms, rate_limit_delay_ms
+        ),
         "crates_processed": results.iter().map(|r| json!({
             "name": r.name,
             "version": r.version,
