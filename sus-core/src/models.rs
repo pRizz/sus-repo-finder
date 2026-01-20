@@ -226,3 +226,17 @@ pub struct QueueItemRow {
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
 }
+
+/// A crawler error row from the database
+/// Note: Uses String for timestamps because SQLite returns TEXT format
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CrawlerErrorRow {
+    pub id: i64,
+    pub run_id: String,
+    pub crate_name: Option<String>,
+    pub version: Option<String>,
+    pub error_type: Option<String>,
+    pub error_message: Option<String>,
+    pub occurred_at: String,
+    pub retry_count: i32,
+}

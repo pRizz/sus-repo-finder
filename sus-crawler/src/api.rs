@@ -20,7 +20,7 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
-use crate::templates::{DetailedTemplate, QueueItemDisplay, StatusTemplate};
+use crate::templates::{DetailedTemplate, ErrorDisplay, ErrorsTemplate, QueueItemDisplay, StatusTemplate};
 use sus_crawler::{CrateDownloader, CratesIoClient, Crawler, CrawlerConfig};
 use sus_detector::Detector;
 
@@ -158,6 +158,11 @@ pub fn create_router(db: Database) -> Router {
             "/api/crawler/queue/add-bulk",
             axum::routing::post(add_bulk_to_queue),
         )
+        // Error tracking endpoint
+        .route(
+            "/api/crawler/store-error",
+            axum::routing::post(store_error),
+        )
         .with_state(state)
 }
 
@@ -229,8 +234,48 @@ async fn detailed() -> impl IntoResponse {
     HtmlTemplate(template)
 }
 
-async fn errors() -> &'static str {
-    "Crawler Portal - Errors Page (TODO: implement template)"
+/// Crawler errors page (HTML template)
+async fn errors(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> impl IntoResponse {
+    // Fetch error counts from database
+    let total_errors = state.db.get_crawler_error_count().await.unwrap_or(0);
+
+    // Fetch recent errors for display
+    let error_rows = state
+        .db
+        .get_recent_crawler_errors(50)
+        .await
+        .unwrap_or_default();
+
+    // Convert to display format
+    let errors: Vec<ErrorDisplay> = error_rows
+        .into_iter()
+        .map(|e| ErrorDisplay {
+            crate_name: e.crate_name.unwrap_or_else(|| "unknown".to_string()),
+            version: e.version.unwrap_or_else(|| "?".to_string()),
+            error_type: e.error_type.unwrap_or_else(|| "unknown".to_string()),
+            error_message: e.error_message.unwrap_or_else(|| "No message".to_string()),
+            occurred_at: e.occurred_at,
+            retry_count: e.retry_count,
+        })
+        .collect();
+
+    // Count errors by type
+    let download_failed_count = errors.iter().filter(|e| e.error_type == "download_failed").count() as i64;
+    let parse_error_count = errors.iter().filter(|e| e.error_type == "parse_error").count() as i64;
+    let analysis_failed_count = errors.iter().filter(|e| e.error_type == "analysis_failed").count() as i64;
+
+    let template = ErrorsTemplate::new(
+        "idle",
+        total_errors,
+        download_failed_count,
+        parse_error_count,
+        analysis_failed_count,
+        errors,
+    );
+
+    HtmlTemplate(template)
 }
 
 async fn status() -> impl IntoResponse {
@@ -285,10 +330,43 @@ async fn queue(
     }))
 }
 
-async fn api_errors() -> impl IntoResponse {
+/// Get recent crawler errors from the database
+/// GET /api/crawler/errors
+///
+/// Returns the most recent errors encountered during crate analysis.
+/// Useful for monitoring and debugging crawling issues.
+async fn api_errors(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> impl IntoResponse {
+    // Get total error count
+    let total = state.db.get_crawler_error_count().await.unwrap_or(0);
+
+    // Get recent errors (limit to 50)
+    let errors = state
+        .db
+        .get_recent_crawler_errors(50)
+        .await
+        .unwrap_or_default();
+
+    let errors_json: Vec<serde_json::Value> = errors
+        .iter()
+        .map(|e| {
+            json!({
+                "id": e.id,
+                "run_id": e.run_id,
+                "crate_name": e.crate_name,
+                "version": e.version,
+                "error_type": e.error_type,
+                "error_message": e.error_message,
+                "occurred_at": e.occurred_at,
+                "retry_count": e.retry_count
+            })
+        })
+        .collect();
+
     Json(json!({
-        "errors": [],
-        "total": 0
+        "errors": errors_json,
+        "total": total
     }))
 }
 
@@ -1378,4 +1456,79 @@ async fn add_bulk_to_queue(
         "total": results.len(),
         "items": results
     }))
+}
+
+/// Request body for storing a crawler error
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoreErrorRequest {
+    /// The crawler run identifier
+    pub run_id: String,
+    /// The name of the crate that failed (optional)
+    pub crate_name: Option<String>,
+    /// The version of the crate (optional)
+    pub version: Option<String>,
+    /// The type/category of error (optional)
+    pub error_type: Option<String>,
+    /// The full error message (optional)
+    pub error_message: Option<String>,
+    /// Number of retry attempts made (defaults to 0)
+    pub retry_count: Option<i32>,
+}
+
+/// Store a crawler error in the database
+/// POST /api/crawler/store-error
+///
+/// This endpoint stores an error that occurred during crate analysis.
+/// Used by the crawler to record failed crate analyses for later review.
+///
+/// Request body (JSON):
+/// - run_id: crawler run identifier (required)
+/// - crate_name: name of the crate that failed (optional)
+/// - version: version of the crate (optional)
+/// - error_type: category of error (optional, e.g., "download_failed", "parse_error")
+/// - error_message: full error message (optional)
+/// - retry_count: number of retry attempts (optional, defaults to 0)
+///
+/// Returns:
+/// - success: true if error was stored
+/// - error_id: database ID of the stored error record
+async fn store_error(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Json(request): axum::extract::Json<StoreErrorRequest>,
+) -> impl IntoResponse {
+    let retry_count = request.retry_count.unwrap_or(0);
+
+    match state
+        .db
+        .insert_crawler_error(
+            &request.run_id,
+            request.crate_name.as_deref(),
+            request.version.as_deref(),
+            request.error_type.as_deref(),
+            request.error_message.as_deref(),
+            retry_count,
+        )
+        .await
+    {
+        Ok(error_id) => Json(json!({
+            "success": true,
+            "error_id": error_id,
+            "stored": {
+                "run_id": request.run_id,
+                "crate_name": request.crate_name,
+                "version": request.version,
+                "error_type": request.error_type,
+                "retry_count": retry_count
+            }
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "success": false,
+                "error": format!("Failed to store error: {}", e)
+            })),
+        )
+            .into_response(),
+    }
 }

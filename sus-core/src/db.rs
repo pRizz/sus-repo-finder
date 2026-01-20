@@ -940,6 +940,109 @@ impl Database {
         Ok(count)
     }
 
+    // ==================== Crawler Error Tracking ====================
+
+    /// Insert a crawler error into the database
+    ///
+    /// Records an error that occurred during crate analysis for later review.
+    /// This allows tracking of which crates failed and why.
+    ///
+    /// # Arguments
+    /// * `run_id` - The crawler run identifier
+    /// * `crate_name` - The name of the crate that failed (optional)
+    /// * `version` - The version of the crate (optional)
+    /// * `error_type` - The type/category of error (optional)
+    /// * `error_message` - The full error message (optional)
+    /// * `retry_count` - Number of retry attempts made
+    ///
+    /// # Returns
+    /// The ID of the inserted error record
+    #[instrument(skip(self))]
+    pub async fn insert_crawler_error(
+        &self,
+        run_id: &str,
+        crate_name: Option<&str>,
+        version: Option<&str>,
+        error_type: Option<&str>,
+        error_message: Option<&str>,
+        retry_count: i32,
+    ) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO crawler_errors (run_id, crate_name, version, error_type, error_message, retry_count)
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(run_id)
+        .bind(crate_name)
+        .bind(version)
+        .bind(error_type)
+        .bind(error_message)
+        .bind(retry_count)
+        .execute(&self.pool)
+        .await?;
+
+        let id = result.last_insert_rowid();
+        info!(
+            "Recorded crawler error id={} for crate={:?} version={:?} type={:?}",
+            id, crate_name, version, error_type
+        );
+        Ok(id)
+    }
+
+    /// Get recent crawler errors with optional limit
+    ///
+    /// Returns errors ordered by most recent first.
+    ///
+    /// # Arguments
+    /// * `limit` - Maximum number of errors to return
+    pub async fn get_recent_crawler_errors(
+        &self,
+        limit: i32,
+    ) -> Result<Vec<crate::models::CrawlerErrorRow>, sqlx::Error> {
+        let errors = sqlx::query_as::<_, crate::models::CrawlerErrorRow>(
+            r#"
+            SELECT id, run_id, crate_name, version, error_type, error_message, occurred_at, retry_count
+            FROM crawler_errors
+            ORDER BY occurred_at DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(errors)
+    }
+
+    /// Get the count of all crawler errors
+    pub async fn get_crawler_error_count(&self) -> Result<i64, sqlx::Error> {
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM crawler_errors")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count.0)
+    }
+
+    /// Get crawler errors for a specific crate
+    pub async fn get_errors_for_crate(
+        &self,
+        crate_name: &str,
+    ) -> Result<Vec<crate::models::CrawlerErrorRow>, sqlx::Error> {
+        let errors = sqlx::query_as::<_, crate::models::CrawlerErrorRow>(
+            r#"
+            SELECT id, run_id, crate_name, version, error_type, error_message, occurred_at, retry_count
+            FROM crawler_errors
+            WHERE crate_name = ?
+            ORDER BY occurred_at DESC
+            "#,
+        )
+        .bind(crate_name)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(errors)
+    }
+
     /// Get findings for a version with comparison to previous version
     ///
     /// Returns findings for the selected version, plus any findings that existed
