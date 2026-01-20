@@ -116,6 +116,69 @@ impl Database {
             .await?;
         Ok(count.0)
     }
+
+    /// Get dashboard statistics
+    pub async fn get_dashboard_stats(&self) -> Result<crate::models::DashboardStats, sqlx::Error> {
+        let total_crates: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM crates")
+            .fetch_one(&self.pool)
+            .await?;
+
+        let total_findings: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM analysis_results")
+            .fetch_one(&self.pool)
+            .await?;
+
+        let high_count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM analysis_results WHERE severity = 'high'")
+                .fetch_one(&self.pool)
+                .await?;
+
+        let medium_count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM analysis_results WHERE severity = 'medium'")
+                .fetch_one(&self.pool)
+                .await?;
+
+        let low_count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM analysis_results WHERE severity = 'low'")
+                .fetch_one(&self.pool)
+                .await?;
+
+        Ok(crate::models::DashboardStats {
+            total_crates: total_crates.0,
+            total_findings: total_findings.0,
+            high_severity: high_count.0,
+            medium_severity: medium_count.0,
+            low_severity: low_count.0,
+        })
+    }
+
+    /// Get recent findings for the dashboard
+    pub async fn get_recent_findings(
+        &self,
+        limit: i32,
+    ) -> Result<Vec<crate::models::RecentFinding>, sqlx::Error> {
+        let findings = sqlx::query_as::<_, crate::models::RecentFinding>(
+            r#"
+            SELECT
+                ar.id,
+                c.name as crate_name,
+                v.version_number as version,
+                ar.issue_type,
+                ar.severity,
+                ar.summary,
+                ar.created_at
+            FROM analysis_results ar
+            JOIN versions v ON ar.version_id = v.id
+            JOIN crates c ON v.crate_id = c.id
+            ORDER BY ar.created_at DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(findings)
+    }
 }
 
 #[cfg(test)]
