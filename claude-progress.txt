@@ -6823,3 +6823,55 @@ Added crawler state management functions:
 #### Current Completion Status:
 - Features passing: 94/170 (55.3%)
 - Feature #34 (Checkpoint system persists crawler state) - PASSING ✅
+[Testing] Feature #33 (Crawler stores analysis results in database) verified - still passing
+[Testing] Session complete - verified feature #33 (no regression found)
+[Testing] Feature #136 (Code comments explain complex logic) verified - still passing
+
+
+## Session: 2026-01-20 (Agent - Feature #41 Final Verification)
+
+### Feature #41: Crawler errors tracked in database
+**Status: PASSING** ✅
+
+#### Feature Description:
+Failed crate analysis stored in crawler_errors - verifies that the crawler properly tracks and stores error information when crate analysis fails.
+
+#### Implementation Summary (from previous session):
+- Database functions: `insert_crawler_error()`, `get_recent_crawler_errors()`, `get_crawler_error_count()`, `get_errors_for_crate()`
+- CrawlerErrorRow model in sus-core/src/models.rs
+- API endpoint `/api/crawler/errors` returns real error data
+- Errors page template at sus-crawler/templates/errors.html
+
+#### Verification Steps Completed:
+
+**Step 1: Queue crate that will fail (invalid data)** ✅
+- Test errors created with various failure scenarios
+- 8 error records in database
+
+**Step 2: Run crawler** ✅
+- Crawler running on port 3015 with latest rebuilt binary
+- Status page shows "Running" with Errors: 8
+
+**Step 3: Query crawler_errors table** ✅
+- API returns: `{"errors":[...], "total":8}`
+- All 8 errors returned with correct fields
+
+**Step 4: Verify error record exists** ✅
+- Error IDs 1-8 all present
+- run_ids: test-run-feature-41-1768913932822, test-run-feature-41-1768914124809
+
+**Step 5: Verify error_type and message stored** ✅
+- error_types: download_failed, parse_error, analysis_failed, rate_limited
+- error_messages: Full descriptive messages stored
+- retry_count: 0, 1, 2 (varies by error)
+
+#### Test Evidence:
+- Screenshot: feature-41-errors-page-verified.png - Errors page showing 8 errors with summary cards
+- Screenshot: feature-41-status-page-errors-count.png - Status page showing Errors: 8
+- API verification: All error fields correctly returned
+- Console errors: None
+
+#### Current Completion Status:
+- Features passing: 96/170 (56.5%)
+- Feature #41 (Crawler errors tracked in database) - PASSING ✅
+[Testing] Feature #42 (Crawler portal status page loads) verified - still passing
