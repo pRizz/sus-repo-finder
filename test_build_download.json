@@ -1,0 +1,4 @@
+{
+  "source": "use tar::Archive;\n\nfn main() {\n    let url = \"https://github.com/example/repo/releases/download/v1.0/binary.tar.gz\";\n    let archive = Archive::new(file);\n    archive.unpack(\"./vendor\");\n}",
+  "file_path": "build.rs"
+}

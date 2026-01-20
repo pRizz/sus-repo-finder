@@ -4,7 +4,7 @@
 //! and proc-macro crates. It uses the `syn` crate for AST parsing and visitors.
 
 use crate::patterns::{default_severity, extract_snippet, Finding};
-use sus_core::IssueType;
+use sus_core::{IssueType, Severity};
 use syn::visit::Visit;
 use syn::{Expr, ExprCall, ExprLit, ExprMethodCall, ExprPath, ExprUnsafe, ItemUse, UseTree};
 
@@ -5491,5 +5491,630 @@ fn handle_child(child: Child) {
             .collect();
 
         assert!(!process_findings.is_empty(), "Should detect Child type reference");
+    }
+
+    // ==========================================================================
+    // Build-Time Download Detection Tests
+    // ==========================================================================
+
+    /// Test detection of HTTP URL in build.rs
+    #[test]
+    fn test_detect_build_download_http_url() {
+        let source = r#"
+fn main() {
+    let url = "https://github.com/example/repo/releases/download/v1.0/binary.tar.gz";
+    download_file(url);
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let download_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::BuildDownload)
+            .collect();
+
+        assert!(!download_findings.is_empty(), "Should detect download URL");
+    }
+
+    /// Test detection of tar crate import
+    #[test]
+    fn test_detect_tar_import() {
+        let source = r#"
+use tar::Archive;
+
+fn main() {
+    let archive = Archive::new(file);
+    archive.unpack("./vendor");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let download_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::BuildDownload)
+            .collect();
+
+        assert!(!download_findings.is_empty(), "Should detect tar import");
+    }
+
+    /// Test build download severity is high
+    #[test]
+    fn test_build_download_has_high_severity() {
+        let source = r#"
+fn main() {
+    let url = "https://example.com/prebuilt/binary.exe";
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let download_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::BuildDownload)
+            .collect();
+
+        assert!(!download_findings.is_empty(), "Should detect download URL");
+        assert_eq!(
+            download_findings[0].severity,
+            sus_core::Severity::High,
+            "Build download should be high severity"
+        );
+    }
+
+    /// Test detection of download function call
+    #[test]
+    fn test_detect_download_function() {
+        let source = r#"
+fn main() {
+    download_binary("https://example.com/file");
+    fetch_prebuilt();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let download_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::BuildDownload)
+            .collect();
+
+        assert!(!download_findings.is_empty(), "Should detect download function");
+    }
+
+    /// Test detection of extract method call
+    #[test]
+    fn test_detect_extract_method() {
+        let source = r#"
+fn main() {
+    let archive = get_archive();
+    archive.extract("./output");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let download_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::BuildDownload)
+            .collect();
+
+        assert!(!download_findings.is_empty(), "Should detect extract method");
+    }
+
+    /// Test detection of GitHub releases URL
+    #[test]
+    fn test_detect_github_releases_url() {
+        let source = r#"
+fn main() {
+    let url = "https://github.com/user/repo/releases/download/v1.0.0/package.tar.gz";
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let download_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::BuildDownload)
+            .collect();
+
+        assert!(!download_findings.is_empty(), "Should detect GitHub releases URL");
+    }
+
+    /// Test detection of S3 URL pattern
+    #[test]
+    fn test_detect_s3_url() {
+        let source = r#"
+fn main() {
+    let url = "https://s3.amazonaws.com/bucket/prebuilt/lib.so";
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let download_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::BuildDownload)
+            .collect();
+
+        assert!(!download_findings.is_empty(), "Should detect S3 URL");
+    }
+
+    /// Test build download context extraction
+    #[test]
+    fn test_build_download_context_extraction() {
+        let source = r#"
+// This is a comment
+fn main() {
+    let binary_url = "https://cdn.example.com/prebuilt/v1/binary.exe";
+    // Download and install
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let download_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::BuildDownload)
+            .collect();
+
+        assert!(!download_findings.is_empty(), "Should detect CDN URL");
+        // context_before and context_after are Strings, check they're not empty
+        assert!(
+            !download_findings[0].context_before.is_empty() || download_findings[0].line_start <= 3,
+            "Should have context before (or be at start of file)"
+        );
+        // context_after may be empty if at end of file, but line should be captured
+        assert!(
+            download_findings[0].line_start > 0,
+            "Should have valid line number"
+        );
+    }
+
+    /// Test build download line numbers
+    #[test]
+    fn test_build_download_line_numbers() {
+        let source = r#"
+// Line 2 comment
+// Line 3 comment
+fn main() {
+    // Line 5 comment
+    let url = "https://example.com/releases/download/v1.0/file.tar.gz";
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let download_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::BuildDownload)
+            .collect();
+
+        assert!(!download_findings.is_empty(), "Should detect URL");
+        assert!(
+            download_findings[0].line_start > 0,
+            "Line number should be captured"
+        );
+    }
+
+    /// Test detection of unpack method
+    #[test]
+    fn test_detect_unpack_method() {
+        let source = r#"
+use tar::Archive;
+
+fn main() {
+    let archive = Archive::new(file);
+    archive.unpack("./output");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let download_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::BuildDownload)
+            .collect();
+
+        // Should detect tar import and unpack method
+        assert!(download_findings.len() >= 1, "Should detect archive operations");
+    }
+
+    /// Test detection of cmake crate
+    #[test]
+    fn test_detect_cmake_crate() {
+        let source = r#"
+use cmake::Config;
+
+fn main() {
+    let dst = Config::new("native")
+        .build();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let download_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::BuildDownload)
+            .collect();
+
+        assert!(!download_findings.is_empty(), "Should detect cmake usage");
+    }
+
+    /// Test detection of prebuilt/precompiled patterns
+    #[test]
+    fn test_detect_prebuilt_patterns() {
+        let source = r#"
+fn main() {
+    let prebuilt_path = find_prebuilt_binary();
+    let precompiled = get_precompiled();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let download_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::BuildDownload)
+            .collect();
+
+        assert!(!download_findings.is_empty(), "Should detect prebuilt patterns");
+    }
+
+    // ========================================================================
+    // Compiler Flags Detection Tests
+    // ========================================================================
+
+    /// Test detection of cargo:rustc-link-lib directive
+    #[test]
+    fn test_detect_rustc_link_lib() {
+        let source = r#"
+fn main() {
+    println!("cargo:rustc-link-lib=ssl");
+    println!("cargo:rustc-link-lib=crypto");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let flag_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::CompilerFlags)
+            .collect();
+
+        assert!(
+            flag_findings.len() >= 2,
+            "Should detect both link-lib directives"
+        );
+        assert!(
+            flag_findings
+                .iter()
+                .any(|f| f.summary.contains("rustc-link-lib")),
+            "Should mention link-lib in summary"
+        );
+    }
+
+    /// Test detection of cargo:rustc-link-search directive (suspicious)
+    #[test]
+    fn test_detect_rustc_link_search() {
+        let source = r#"
+fn main() {
+    println!("cargo:rustc-link-search=native=/usr/local/lib");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let flag_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::CompilerFlags)
+            .collect();
+
+        assert!(!flag_findings.is_empty(), "Should detect link-search directive");
+        // Link-search should be medium severity (suspicious)
+        assert!(
+            flag_findings
+                .iter()
+                .any(|f| f.severity == Severity::Medium),
+            "Link-search should have medium severity"
+        );
+    }
+
+    /// Test detection of cargo:rustc-cfg directive (benign)
+    #[test]
+    fn test_detect_rustc_cfg() {
+        let source = r#"
+fn main() {
+    println!("cargo:rustc-cfg=feature=\"nightly\"");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let flag_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::CompilerFlags)
+            .collect();
+
+        assert!(!flag_findings.is_empty(), "Should detect rustc-cfg directive");
+        // cfg should be low severity (benign)
+        assert!(
+            flag_findings.iter().any(|f| f.severity == Severity::Low),
+            "rustc-cfg should have low severity"
+        );
+    }
+
+    /// Test detection of cargo:rustc-env directive (suspicious)
+    #[test]
+    fn test_detect_rustc_env() {
+        let source = r#"
+fn main() {
+    println!("cargo:rustc-env=MY_SECRET=hidden_value");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let flag_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::CompilerFlags)
+            .collect();
+
+        assert!(!flag_findings.is_empty(), "Should detect rustc-env directive");
+        // rustc-env should be medium severity (suspicious)
+        assert!(
+            flag_findings
+                .iter()
+                .any(|f| f.severity == Severity::Medium),
+            "rustc-env should have medium severity"
+        );
+    }
+
+    /// Test detection of cargo:rustc-link-arg directive (suspicious)
+    #[test]
+    fn test_detect_rustc_link_arg() {
+        let source = r#"
+fn main() {
+    println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let flag_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::CompilerFlags)
+            .collect();
+
+        assert!(
+            !flag_findings.is_empty(),
+            "Should detect rustc-link-arg directive"
+        );
+        assert!(
+            flag_findings
+                .iter()
+                .any(|f| f.severity == Severity::Medium),
+            "rustc-link-arg should have medium severity"
+        );
+    }
+
+    /// Test detection of cargo:rerun-if-changed directive (benign)
+    #[test]
+    fn test_detect_rerun_if_changed() {
+        let source = r#"
+fn main() {
+    println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=src/lib.rs");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let flag_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::CompilerFlags)
+            .collect();
+
+        assert!(
+            flag_findings.len() >= 2,
+            "Should detect both rerun-if-changed directives"
+        );
+        // rerun-if-changed should be low severity (benign)
+        assert!(
+            flag_findings.iter().all(|f| f.severity == Severity::Low),
+            "rerun-if-changed should have low severity"
+        );
+    }
+
+    /// Test detection of cargo:warning directive (benign)
+    #[test]
+    fn test_detect_cargo_warning() {
+        let source = r#"
+fn main() {
+    println!("cargo:warning=This crate requires feature X");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let flag_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::CompilerFlags)
+            .collect();
+
+        assert!(!flag_findings.is_empty(), "Should detect cargo:warning directive");
+        assert!(
+            flag_findings.iter().any(|f| f.severity == Severity::Low),
+            "cargo:warning should have low severity"
+        );
+    }
+
+    /// Test that compiler flags detection includes line numbers
+    #[test]
+    fn test_compiler_flags_line_numbers() {
+        let source = r#"
+fn main() {
+    // Line 3
+    println!("cargo:rustc-link-lib=foo");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let flag_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::CompilerFlags)
+            .collect();
+
+        assert!(!flag_findings.is_empty(), "Should detect directive");
+        // The directive is on line 4
+        assert!(
+            flag_findings.iter().any(|f| f.line_start == 4),
+            "Should capture correct line number"
+        );
+    }
+
+    /// Test that non-cargo println! is not flagged
+    #[test]
+    fn test_normal_println_not_flagged() {
+        let source = r#"
+fn main() {
+    println!("Hello, world!");
+    println!("Building the project...");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let flag_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::CompilerFlags)
+            .collect();
+
+        assert!(
+            flag_findings.is_empty(),
+            "Normal println! should not be flagged as compiler flags"
+        );
+    }
+
+    /// Test detection of deprecated cargo:rustc-flags directive
+    #[test]
+    fn test_detect_rustc_flags_deprecated() {
+        let source = r#"
+fn main() {
+    println!("cargo:rustc-flags=-l dylib=foo");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let flag_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::CompilerFlags)
+            .collect();
+
+        assert!(
+            !flag_findings.is_empty(),
+            "Should detect deprecated rustc-flags directive"
+        );
+        assert!(
+            flag_findings
+                .iter()
+                .any(|f| f.severity == Severity::Medium),
+            "Deprecated rustc-flags should have medium severity"
+        );
+    }
+
+    /// Test compiler flags context extraction
+    #[test]
+    fn test_compiler_flags_context_extraction() {
+        let source = r#"fn main() {
+    // Setup for linking
+    let lib_path = "/usr/local/lib";
+    println!("cargo:rustc-link-search=native={}", lib_path);
+    // Done setting up
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let flag_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::CompilerFlags)
+            .collect();
+
+        assert!(!flag_findings.is_empty(), "Should detect directive");
+        // Check that context is captured
+        let finding = &flag_findings[0];
+        assert!(
+            !finding.code_snippet.is_empty(),
+            "Should have code snippet"
+        );
+    }
+
+    /// Test multiple compiler flags in one file
+    #[test]
+    fn test_multiple_compiler_flags() {
+        let source = r#"
+fn main() {
+    println!("cargo:rustc-link-lib=ssl");
+    println!("cargo:rustc-link-lib=crypto");
+    println!("cargo:rustc-link-search=/opt/openssl/lib");
+    println!("cargo:rustc-cfg=feature=\"openssl\"");
+    println!("cargo:rerun-if-changed=build.rs");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let flag_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::CompilerFlags)
+            .collect();
+
+        // Should detect all 5 directives
+        assert_eq!(
+            flag_findings.len(),
+            5,
+            "Should detect all 5 compiler flag directives"
+        );
+
+        // Check severity distribution
+        let medium_count = flag_findings
+            .iter()
+            .filter(|f| f.severity == Severity::Medium)
+            .count();
+        let low_count = flag_findings
+            .iter()
+            .filter(|f| f.severity == Severity::Low)
+            .count();
+
+        // 3 link-lib/link-search should be medium, 2 cfg/rerun should be low
+        assert_eq!(medium_count, 3, "Should have 3 medium severity findings");
+        assert_eq!(low_count, 2, "Should have 2 low severity findings");
+    }
+
+    /// Test detection with print! macro (not just println!)
+    #[test]
+    fn test_detect_print_macro() {
+        let source = r#"
+fn main() {
+    print!("cargo:rustc-link-lib=foo\n");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let flag_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::CompilerFlags)
+            .collect();
+
+        assert!(
+            !flag_findings.is_empty(),
+            "Should detect cargo directive in print! macro too"
+        );
     }
 }
