@@ -1918,3 +1918,94 @@ The implementation is verified through:
 Feature #18 marked as PASSING ✅
 Commit: 6d79df9
 Final stats: 31/170 features passing (18.2%)
+[Testing] 2026-01-19 19:05 - Regression test for Feature #14 (Pattern detector identifies process spawning)
+  - Test 1: fork/execve patterns
+    - ✅ nix::unistd::fork import detected (process_spawn, medium)
+    - ✅ libc::execve import detected (process_spawn, medium)
+    - ✅ unsafe block detected (unsafe_block, low)
+  - Test 2: tokio::process::Command
+    - ✅ tokio::process::Command import detected (process_spawn, medium)
+    - ✅ Command::new call detected (shell_command, medium)
+    - ✅ .wait() method detected (process_spawn, medium)
+  - Test 3: subprocess/libc patterns
+    - ✅ subprocess::Popen import detected (process_spawn, medium)
+    - ✅ libc::{posix_spawn, system, popen} imports detected (process_spawn, medium)
+    - ✅ Raw pointer in unsafe block detected (unsafe_block, medium)
+  - Screenshot: .playwright-mcp/.playwright-mcp/regression-test-feature-14-process-spawn.png
+  - Console errors: favicon 404 only (cosmetic)
+  - All 3 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #14 (Pattern detector identifies process spawning) still passing
+
+## Session: 2026-01-19 (Agent - Feature #21)
+
+### Feature #21: Pattern detector identifies compiler flag manipulation
+**Status: PASSING** ✅
+
+#### Feature Description:
+Detects cargo:rustc-link-lib and similar build script outputs that manipulate
+compiler/linker behavior. These can be used to link malicious libraries or
+modify the build process in unexpected ways.
+
+#### Implementation Details:
+1. **detect_compiler_flags() function** - Line-based detection of cargo directives
+2. **check_cargo_directive() helper** - Parses println!/print! macros for cargo: patterns
+3. **Supported directives with severity classification:**
+   - **Medium severity (suspicious):**
+     - cargo:rustc-link-lib - Links external libraries
+     - cargo:rustc-link-search - Adds linker search paths
+     - cargo:rustc-link-arg - Adds linker arguments
+     - cargo:rustc-cdylib-link-arg - Adds linker argument to cdylib
+     - cargo:rustc-flags - Raw rustc flags (deprecated)
+     - cargo:rustc-env - Sets env vars during compilation
+   - **Low severity (benign):**
+     - cargo:rustc-cfg - Conditional compilation flags
+     - cargo:rustc-check-cfg - Valid cfg value declarations
+     - cargo:rerun-if-changed - Rebuild triggers
+     - cargo:rerun-if-env-changed - Env-based rebuild triggers
+     - cargo:warning - Build warnings
+
+4. **14 unit tests added:**
+   - test_detect_rustc_link_lib
+   - test_detect_rustc_link_search
+   - test_detect_rustc_cfg
+   - test_detect_rustc_env
+   - test_detect_rustc_link_arg
+   - test_detect_rerun_if_changed
+   - test_detect_cargo_warning
+   - test_compiler_flags_line_numbers
+   - test_normal_println_not_flagged
+   - test_detect_rustc_flags_deprecated
+   - test_compiler_flags_context_extraction
+   - test_multiple_compiler_flags
+   - test_detect_print_macro
+
+#### Verification Results (via POST /api/crawler/test-detector):
+1. **Test 1 - Basic directives:**
+   - cargo:rustc-link-lib=ssl → DETECTED, medium severity ✅
+   - cargo:rustc-link-search=/opt/openssl/lib → DETECTED, medium severity ✅
+   - cargo:rustc-cfg=feature="openssl" → DETECTED, low severity ✅
+   - cargo:rerun-if-changed=build.rs → DETECTED, low severity ✅
+
+2. **Test 2 - Suspicious directives:**
+   - cargo:rustc-env=SECRET_KEY=hidden123 → DETECTED, medium severity ✅
+   - cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN → DETECTED, medium severity ✅
+   - cargo:rustc-flags=-l dylib=foo → DETECTED, medium severity ✅
+   - cargo:warning=This crate is deprecated → DETECTED, low severity ✅
+
+#### Test Evidence:
+- Screenshots:
+  - .playwright-mcp/feature-21-compiler-flags-crawler-portal.png
+  - .playwright-mcp/feature-21-compiler-flags-dashboard.png
+- Test files:
+  - test_compiler_flags.json
+  - test_compiler_flags2.json
+- Console errors: favicon 404 only (cosmetic)
+- Build: ✅ Successful (./init.sh)
+
+#### Commits:
+- c68854f: Verify Feature #21: Pattern detector identifies compiler/linker flag manipulation
+
+#### Current Completion Status:
+- Features passing: 32/170 (18.8%)
+- Feature #21 (Pattern detector identifies compiler flag manipulation) - PASSING ✅
