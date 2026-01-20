@@ -223,3 +223,45 @@
 - Feature #3 (sus-core crate exports shared types) - PASSING
 - Feature #4 (Dashboard server starts on configured port) - PASSING
 - Feature #5 (Crawler server starts on configured port) - PASSING
+
+## Session: 2026-01-20 (Agent - Feature #61)
+
+### Feature #61: Crate list page loads
+**Status: PASSING**
+
+#### What was done:
+- Created `CrateWithStats` model with finding_count and max_severity fields
+- Added `get_crates()` method to Database for fetching crates with stats
+- Created askama templates directory with `base.html` and `crate_list.html`
+- Implemented `crate_list` handler that queries database and renders template
+- Added `HtmlTemplate` wrapper for askama template responses
+- Added custom filters: format_downloads, format_date, pluralize
+- Fixed test in sus-core/src/lib.rs to use String for CrateWithStats timestamps
+
+#### Files created/modified:
+- `sus-dashboard/askama.toml` - askama configuration
+- `sus-dashboard/templates/base.html` - base layout template with nav and footer
+- `sus-dashboard/templates/crate_list.html` - crate list template with table/empty state
+- `sus-dashboard/src/templates.rs` - template structs and filters
+- `sus-dashboard/src/api.rs` - crate_list handler with database query
+- `sus-core/src/db.rs` - added get_crates() method
+- `sus-core/src/models.rs` - added CrateWithStats model
+
+#### Steps verified:
+1. ✅ Navigate to /crates - Page loads successfully
+2. ✅ Verify HTTP 200 - Confirmed via curl and browser automation
+3. ✅ Verify crate list displayed - Shows proper UI with:
+   - Navigation bar with "Sus Repo Finder" branding
+   - "Scanned Crates" heading with count
+   - Empty state message when no crates exist
+   - Dark theme with proper styling
+
+#### Test evidence:
+- Screenshot saved: .playwright-mcp/feature-61-crates-list-final.png
+- Browser automation confirmed page title: "Crates - Sus Repo Finder"
+- No console errors detected
+- Navigation links work correctly
+
+#### Current Completion Status:
+- Features passing: 6/170 (3.5%)
+- Feature #61 (Crate list page loads) - PASSING
