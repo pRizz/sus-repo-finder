@@ -2499,3 +2499,162 @@ Server handles parallel requests without errors or race conditions.
 #### Current Completion Status:
 - Features passing: 36/170 (21.2%)
 - Feature #133 (Multiple concurrent API requests handled) - PASSING ✅
+
+## Session: 2026-01-19 (Testing Agent)
+
+### Feature #101: API error returns JSON error response
+**Status: PASSING** ✅ (Regression test - still working)
+
+#### Verification Steps:
+
+1. **Step 1: Trigger API error condition** ✅
+   - Tested: GET /api/crates/this-crate-definitely-does-not-exist-123456
+   - Tested: GET /api/crates/anyhow/versions/99.99.99
+   - Both returned 404 status codes
+
+2. **Step 2: Verify JSON response** ✅
+   - Content-Type: application/json
+   - Response body is valid JSON
+
+3. **Step 3: Verify error field present** ✅
+   - Non-existent crate: "error": "Crate 'this-crate-definitely-does-not-exist-123456' not found"
+   - Non-existent version: "error": "Version '99.99.99' not found for crate 'anyhow'"
+
+4. **Step 4: Verify message is meaningful** ✅
+   - Non-existent crate: "message": "The requested crate does not exist in the database"
+   - Non-existent version: "message": "The requested version does not exist for this crate"
+
+#### Evidence:
+- Browser automation tests via fetch() API
+- Screenshot: .playwright-mcp/.playwright-mcp/feature-101-api-error-json.png
+- Console errors: favicon 404 only (cosmetic) + expected 404s from test requests
+
+#### Code Review Confirmed:
+- sus-dashboard/src/api.rs properly returns Json(json!({"error": ..., "message": ...})) for all API error cases
+- Lines 312-319: api_crate_detail returns JSON error for not found
+- Lines 416-424: api_version_detail returns JSON error for not found  
+- All database error handlers return proper JSON error responses
+
+[Testing] Session complete - verified Feature #101 (API error returns JSON error response) still passing
+
+## Session: 2026-01-19 (Testing Agent - Feature #20 Regression)
+
+### Feature #20: Pattern detector identifies obfuscation
+**Status: PASSING** (Regression Test)
+
+#### Feature Description:
+Detects base64 decoding, hex strings, encoded data
+
+#### Verification Steps:
+1. **Step 1: Create test with base64::decode of suspicious string** - PASS
+   - Test code with use base64 and base64::decode(encoded).unwrap()
+   - Submitted to POST /api/crawler/test-detector endpoint
+
+2. **Step 2: Run detector** - PASS
+   - Response: success=true, findings_count=3
+
+3. **Step 3: Verify obfuscation pattern detected** - PASS
+   - Finding 1: Obfuscation-related import detected: base64 (high severity)
+   - Finding 2: Obfuscation function call detected: base64::decode (high severity)
+   - Finding 3: Obfuscation type reference detected: base64::decode (high severity)
+
+#### Additional Testing:
+- Hex encoding detection also verified: hex::decode and hex::encode - 4 findings detected
+- All findings have detection_type: obfuscation and issue_type: obfuscation
+
+#### Test Evidence:
+- Screenshot: .playwright-mcp/feature-20-obfuscation-regression-test.png
+- Console errors: Only 422s from initial debug attempts (not bugs)
+- All 3 verification steps PASS
+
+#### Current Completion Status:
+- Features passing: 39/170 (22.9%)
+- Feature #20 (Pattern detector identifies obfuscation) - STILL PASSING
+
+[Testing] Session complete - verified Feature #20 still passing
+
+[Testing] 2026-01-19 19:20 - Regression test for Feature #118 (Color contrast meets WCAG AA)
+  - Step 1: Loaded dashboard page at http://localhost:3002 ✅
+  - Step 2: Verified contrast ratios using JavaScript calculations
+    - text-gray-400 on dark-bg: 7.45:1 ratio ✅ (meets WCAG AA 4.5:1)
+    - But found 6 elements with text-gray-500 (3.91:1 ratio) ❌
+  - Step 3: Investigated the source
+    - Template source files (landing.html) are CORRECT - using text-gray-400
+    - Server is serving OLD compiled binary with text-gray-500
+    - Git history shows fix committed at 19:12 (f699add)
+    - Binary rebuilt at 19:15 but server process not restarted
+  - REGRESSION CAUSE: Stale server process - not a code regression
+  - FIX: Server needs to be restarted to pick up the rebuilt binary
+  - Feature marked as FAILING until server restart
+[Testing] Session complete - Feature #118 requires server restart (not a code regression)
+
+## Session: 2026-01-19 (Agent - Feature #138)
+
+### Feature #138: Architecture overview in docs
+**Status: PASSING**
+
+#### Feature Description:
+High-level design explained - verify that architecture overview is documented.
+
+#### Verification Steps:
+
+1. **Step 1: Read documentation** - PASS
+   - Read README.md (276 lines)
+   - Comprehensive documentation covering all project aspects
+
+2. **Step 2: Verify crate structure explained** - PASS
+   - Project Structure section (lines 65-76) shows directory layout
+   - Architecture section has detailed ASCII diagram showing:
+     - APPLICATIONS layer: sus-crawler, sus-dashboard
+     - SHARED LIBRARIES layer: sus-core, sus-detector
+     - STORAGE layer: SQLite database
+   - Crate Responsibilities table (lines 218-225) explains each crate type and purpose
+
+3. **Step 3: Verify data flow documented** - PASS
+   - Data Flow section (lines 227-247) with diagram showing:
+     - crates.io to sus-crawler to SQLite
+     - sus-detector for pattern detection
+     - sus-dashboard for viewing
+   - Numbered list (1-6) explaining each step of the data flow
+   - Request Flow section (lines 249-263) showing HTTP request handling
+
+#### Implementation:
+Enhanced the Architecture section in README.md with:
+- Detailed ASCII diagram with 3 layers (Applications, Shared Libraries, Storage)
+- Crate Responsibilities table with Type and Purpose columns
+- Data Flow diagram with numbered steps
+- Request Flow diagrams for crawler portal and dashboard
+
+#### Files Modified:
+- README.md (+97 lines, -23 lines)
+
+#### Test Evidence:
+- Screenshot: .playwright-mcp/feature-138-architecture-docs.png
+- Console errors: favicon 404 only (cosmetic)
+- All 3 verification steps PASS
+
+#### Commit:
+- 3935dee: Implement Feature #138: Architecture overview in docs
+
+#### Current Completion Status:
+- Features passing: 39/170 (22.9%)
+- Feature #138 (Architecture overview in docs) - PASSING
+
+
+## UPDATE - Feature #118 FIXED
+
+After restarting the dashboard server (PID 65251 -> 24701), all checks now pass:
+  - ✅ Step 1: Text-gray-500 elements: 0 (was 6)
+  - ✅ Step 2: Text-gray-400 contrast ratio: 7.45:1 (exceeds 4.5:1 WCAG AA requirement)
+  - ✅ Step 3: Footer text contrast ratio: 7.45:1 (exceeds 4.5:1 requirement)
+  
+The issue was a stale server process - the templates had been updated in git (f699add)
+and the binary was rebuilt, but the server wasn't restarted to pick up the new binary.
+
+After restart, all contrast ratios meet WCAG AA requirements.
+Feature #118 marked as PASSING ✅
+
+Screenshots:
+  - .playwright-mcp/feature-118-regression-dashboard.png (showing issue)
+  - .playwright-mcp/feature-118-regression-fixed.png (after fix)
+
