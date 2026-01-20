@@ -3971,3 +3971,110 @@ The sorting functionality is implemented in:
 #### Current Completion Status:
 - Features passing: 56/170 (32.9%)
 - Feature #69 (Crate list sort by recent analysis works) - PASSING ✅
+[Testing] 2026-01-19 19:59 - Regression test for Feature #10 (Git repository initialized)
+  - Step 1: Verify .git directory exists ✅
+    - .git directory present with all standard structures
+  - Step 2: Verify at least one commit exists ✅
+    - HEAD: f9991f29c88a0a0b09e1b6491ce9de76ee74a4b9
+    - Multiple commits present (57+ commits in history)
+  - Step 3: Verify initial files are committed ✅
+    - git ls-files shows tracked files: .gitignore, source code, templates, etc.
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #10 still passing
+[Testing] 2026-01-19 20:00 - Regression test for Feature #10 (Git repository initialized)
+  - Step 1: Verify .git directory exists ✅
+    - .git directory present with all standard structures (HEAD, config, objects, refs, hooks)
+  - Step 2: Verify at least one commit exists ✅
+    - HEAD: c38f313c9279d8f8188d48a492940fcc9fa9005f
+    - 105 commits present in history
+  - Step 3: Verify initial files are committed ✅
+    - git ls-files shows tracked files: Cargo.toml, sus-core/*, sus-crawler/*, sus-dashboard/*, etc.
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #10 still passing
+
+## Session: 2026-01-20 (Agent - Feature #87)
+
+### Feature #87: Loading states shown during API calls
+**Status: PASSING** ✅
+
+#### Feature Description:
+Spinners and loading indicators visible during API calls and page navigation.
+
+#### Implementation Summary:
+
+1. **Added Loading Overlay CSS** (sus-dashboard/templates/base.html)
+   - Fixed position overlay covering entire viewport
+   - Dark semi-transparent background with blur effect
+   - Centered spinner with "Loading..." text
+   - Uses display:none/flex toggle via .active class
+
+2. **Added Spinner Animation**
+   - 48px circular spinner with blue accent border
+   - CSS keyframe animation (spin 1s linear infinite)
+   - Smaller 16px spinner for search input
+
+3. **Added Search Form Spinner**
+   - Inline spinner in search box (absolute positioned right)
+   - Shows when form has .loading class
+   - Coordinated with main loading overlay
+
+4. **Added Skeleton CSS Class**
+   - Shimmer animation for skeleton loading states
+   - Gradient background animation (200% width)
+   - Available for future use on individual elements
+
+5. **Added JavaScript Loading State Management**
+   - showLoading() / hideLoading() global functions
+   - Auto-shows loading on:
+     - Navigation link clicks (data-loading="true" or href^="/")
+     - Search form submission
+     - Sort dropdown changes
+   - Auto-hides on:
+     - pageshow event (handles back/forward navigation)
+     - window.load event
+
+#### Verification Steps:
+
+1. **Step 1: Navigate to crate list** ✅
+   - Navigated to http://localhost:3004/crates
+   - Page loads correctly with all data
+
+2. **Step 2: Observe loading state before data** ✅
+   - Loading overlay element exists (#loading-overlay)
+   - showLoading() function available globally
+   - Loading state triggered on link clicks
+
+3. **Step 3: Verify spinner or skeleton shown** ✅
+   - Main loading spinner visible when active
+   - Screenshot: .playwright-mcp/feature-87-loading-spinner-active.png
+   - Search spinner visible when form loading
+   - Screenshot: .playwright-mcp/feature-87-search-spinner.png
+
+4. **Step 4: Verify content replaces loader** ✅
+   - Content visible after hideLoading() called
+   - Screenshot: .playwright-mcp/feature-87-content-loaded.png
+   - Screenshot: .playwright-mcp/feature-87-content-after-loading.png
+
+#### Files Modified:
+- sus-dashboard/templates/base.html (+159 lines)
+  - Added CSS for loading overlay, spinner, skeleton
+  - Added HTML for loading overlay
+  - Added data-loading attributes to nav links
+  - Converted search to form element with spinner
+  - Added JavaScript for loading state management
+
+#### Test Evidence:
+- Screenshots:
+  - feature-87-loading-spinner-active.png - Shows spinner overlay visible
+  - feature-87-search-spinner.png - Shows search spinner with overlay
+  - feature-87-content-loaded.png - Shows content after loading completes
+  - feature-87-content-after-loading.png - Final state with data visible
+- Console errors: None (only Tailwind CDN warning - cosmetic)
+- Build: Successful with ./init.sh
+
+#### Commit:
+- cf526e3: Implement Feature #87: Loading states shown during API calls
+
+#### Current Completion Status:
+- Features passing: 56/170 (32.9%)
+- Feature #87 (Loading states shown during API calls) - PASSING ✅
