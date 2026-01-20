@@ -2952,3 +2952,47 @@ Each crate has single responsibility - verify proper separation of concerns acro
   - Result: STILL PASSING - no regression found
 [Testing] Session complete - verified Feature #11 still passing
 
+## Session: 2026-01-19 (Agent - Feature #148)
+
+### Feature #148: Show removed patterns in newer versions
+**Status: PASSING**
+
+#### Feature Description:
+When viewing a crate version, show patterns that existed in older versions but were removed/fixed in this version, helping users track security improvements.
+
+#### Implementation Summary:
+
+1. **Added FindingStatus enum** (sus-core/src/models.rs)
+   - Current - Finding exists in current version
+   - New - Finding is new in this version
+   - Removed - Finding was removed/fixed
+
+2. **Added FindingWithStatus model** (sus-core/src/models.rs)
+   - Extends AnalysisResultRow with status and from_version fields
+
+3. **Added get_findings_with_comparison() method** (sus-core/src/db.rs)
+   - Compares findings between selected version and previous version
+   - Returns current findings with NEW/Current status
+   - Returns findings from previous version not in current as REMOVED
+
+4. **Updated crate detail page** (sus-dashboard/templates/crate_detail.html)
+   - Purple NEW badge for new findings
+   - Green REMOVED badge for removed findings
+   - Removed since vX.X.X text showing source version
+   - Visual styling: reduced opacity, line-through text, green borders
+
+5. **Updated API** (sus-dashboard/src/api.rs)
+   - Changed to use get_findings_with_comparison()
+
+#### Test Evidence:
+- Screenshot: .playwright-mcp/feature-148-removed-patterns-shown.png
+- Console errors: None
+- Build: Successful
+
+#### Commit:
+- 9cd5d2e: Implement Feature #148: Show removed patterns in newer versions
+
+#### Current Completion Status:
+- Features passing: 45/170 (26.5%)
+- Feature #148 - PASSING
+

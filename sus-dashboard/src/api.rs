@@ -79,13 +79,11 @@ async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let findings_result = state.db.get_recent_findings(10).await;
 
     match (stats_result, findings_result) {
-        (Ok(stats), Ok(recent_findings)) => {
-            HtmlTemplate(LandingTemplate {
-                stats,
-                recent_findings,
-            })
-            .into_response()
-        }
+        (Ok(stats), Ok(recent_findings)) => HtmlTemplate(LandingTemplate {
+            stats,
+            recent_findings,
+        })
+        .into_response(),
         (Err(err), _) | (_, Err(err)) => {
             tracing::error!("Database error loading dashboard: {}", err);
             (
@@ -175,11 +173,7 @@ async fn crate_detail(
         }
         Ok(None) => {
             // Crate not found
-            (
-                StatusCode::NOT_FOUND,
-                format!("Crate '{}' not found", name),
-            )
-                .into_response()
+            (StatusCode::NOT_FOUND, format!("Crate '{}' not found", name)).into_response()
         }
         Err(err) => {
             tracing::error!("Database error loading crate '{}': {}", name, err);
@@ -519,11 +513,13 @@ async fn api_interesting(State(state): State<Arc<AppState>>) -> impl IntoRespons
                 .iter()
                 .filter(|c| c.finding_count > 0)
                 .max_by_key(|c| c.finding_count)
-                .map(|c| json!({
-                    "name": c.name,
-                    "finding_count": c.finding_count,
-                    "max_severity": c.max_severity
-                }));
+                .map(|c| {
+                    json!({
+                        "name": c.name,
+                        "finding_count": c.finding_count,
+                        "max_severity": c.max_severity
+                    })
+                });
 
             Json(json!({
                 "most_flagged": most_flagged,

@@ -112,11 +112,11 @@ const SHELL_COMMAND_PATTERNS: &[&str] = &[
 /// Shell invocation arguments that are particularly suspicious
 /// (indicate shell interpretation of commands)
 const SUSPICIOUS_SHELL_ARGS: &[&str] = &[
-    "-c",    // Execute command string
-    "/C",    // Windows cmd.exe execute
-    "-e",    // Execute expression
-    "eval",  // Shell eval
-    "exec",  // Shell exec
+    "-c",   // Execute command string
+    "/C",   // Windows cmd.exe execute
+    "-e",   // Execute expression
+    "eval", // Shell eval
+    "exec", // Shell exec
 ];
 
 /// Environment variable access patterns to detect.
@@ -183,14 +183,7 @@ const SENSITIVE_ENV_VARS: &[&str] = &[
 ];
 
 /// Environment access methods that indicate reading/writing env vars
-const ENV_ACCESS_METHODS: &[&str] = &[
-    "var",
-    "var_os",
-    "vars",
-    "vars_os",
-    "set_var",
-    "remove_var",
-];
+const ENV_ACCESS_METHODS: &[&str] = &["var", "var_os", "vars", "vars_os", "set_var", "remove_var"];
 
 /// Dynamic library loading patterns to detect.
 /// These indicate potential code injection or plugin loading in build scripts
@@ -225,14 +218,10 @@ const DYNAMIC_LIB_PATTERNS: &[&str] = &[
 /// Dynamic library method names that indicate runtime loading
 const DYNAMIC_LIB_METHODS: &[&str] = &[
     // libloading methods
-    "new",     // Library::new
-    "get",     // library.get::<fn()>
-    "into_raw",
-    "from_raw",
-    // C-style methods
-    "dlopen",
-    "dlsym",
-    "dlclose",
+    "new", // Library::new
+    "get", // library.get::<fn()>
+    "into_raw", "from_raw", // C-style methods
+    "dlopen", "dlsym", "dlclose",
 ];
 
 /// Process spawning patterns to detect.
@@ -526,11 +515,7 @@ impl Detector {
         // Suspicious cargo directives that manipulate compilation
         let suspicious_directives = [
             ("cargo:rustc-link-lib", "Links external library", true),
-            (
-                "cargo:rustc-link-search",
-                "Adds linker search path",
-                true,
-            ),
+            ("cargo:rustc-link-search", "Adds linker search path", true),
             (
                 "cargo:rustc-cdylib-link-arg",
                 "Adds linker argument to cdylib",
@@ -552,11 +537,7 @@ impl Detector {
                 "Sets conditional compilation flag",
                 false,
             ),
-            (
-                "cargo:rustc-check-cfg",
-                "Declares valid cfg values",
-                false,
-            ),
+            ("cargo:rustc-check-cfg", "Declares valid cfg values", false),
             (
                 "cargo:rerun-if-changed",
                 "Triggers rebuild on file change",
@@ -655,8 +636,7 @@ impl<'a> NetworkCallVisitor<'a> {
 
     /// Create a finding for a detected network pattern
     fn create_finding(&mut self, line: usize, pattern_found: &str, summary: &str) {
-        let (context_before, snippet, context_after) =
-            extract_snippet(self.source, line, line, 3);
+        let (context_before, snippet, context_after) = extract_snippet(self.source, line, line, 3);
 
         let finding = Finding::new(
             IssueType::Network,
@@ -701,10 +681,11 @@ impl<'a> Visit<'a> for NetworkCallVisitor<'a> {
         if let Expr::Path(ExprPath { path, .. }) = &*node.func {
             let path_str = format_path(path);
             if Self::matches_network_pattern(&path_str) {
-                let line = self.get_line_number(path.segments.first().map_or_else(
-                    || proc_macro2::Span::call_site(),
-                    |s| s.ident.span(),
-                ));
+                let line = self.get_line_number(
+                    path.segments
+                        .first()
+                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                );
                 let pattern = NETWORK_PATTERNS
                     .iter()
                     .find(|p| path_str.contains(*p))
@@ -723,7 +704,9 @@ impl<'a> Visit<'a> for NetworkCallVisitor<'a> {
     fn visit_expr_method_call(&mut self, node: &'a ExprMethodCall) {
         let method_name = node.method.to_string();
         // Common network method names that are suspicious in build scripts
-        let suspicious_methods = ["connect", "bind", "send", "recv", "get", "post", "put", "delete"];
+        let suspicious_methods = [
+            "connect", "bind", "send", "recv", "get", "post", "put", "delete",
+        ];
 
         // We look at the receiver to see if it's a network type
         if let Expr::Path(ExprPath { path, .. }) = &*node.receiver {
@@ -836,8 +819,7 @@ impl<'a> FileAccessVisitor<'a> {
 
     /// Create a finding for a detected file access pattern
     fn create_finding(&mut self, line: usize, pattern_found: &str, summary: &str) {
-        let (context_before, snippet, context_after) =
-            extract_snippet(self.source, line, line, 3);
+        let (context_before, snippet, context_after) = extract_snippet(self.source, line, line, 3);
 
         let finding = Finding::new(
             IssueType::FileAccess,
@@ -882,10 +864,11 @@ impl<'a> Visit<'a> for FileAccessVisitor<'a> {
         if let Expr::Path(ExprPath { path, .. }) = &*node.func {
             let path_str = format_path(path);
             if Self::matches_file_pattern(&path_str) {
-                let line = self.get_line_number(path.segments.first().map_or_else(
-                    || proc_macro2::Span::call_site(),
-                    |s| s.ident.span(),
-                ));
+                let line = self.get_line_number(
+                    path.segments
+                        .first()
+                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                );
                 let pattern = FILE_ACCESS_PATTERNS
                     .iter()
                     .find(|p| path_str.contains(*p))
@@ -912,7 +895,10 @@ impl<'a> Visit<'a> for FileAccessVisitor<'a> {
                 self.create_finding(
                     line,
                     &path_str,
-                    &format!("File system method call detected: {}.{}", path_str, method_name),
+                    &format!(
+                        "File system method call detected: {}.{}",
+                        path_str, method_name
+                    ),
                 );
             }
         }
@@ -986,8 +972,22 @@ impl<'a> ShellCommandVisitor<'a> {
 
     /// Check if a string literal is a shell name
     fn is_shell_name(s: &str) -> bool {
-        let shell_names = ["bash", "sh", "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "zsh", "fish"];
-        shell_names.contains(&s) || s.starts_with("/bin/") || s.starts_with("/usr/bin/") || s.contains("\\cmd") || s.contains("\\powershell")
+        let shell_names = [
+            "bash",
+            "sh",
+            "cmd",
+            "cmd.exe",
+            "powershell",
+            "powershell.exe",
+            "pwsh",
+            "zsh",
+            "fish",
+        ];
+        shell_names.contains(&s)
+            || s.starts_with("/bin/")
+            || s.starts_with("/usr/bin/")
+            || s.contains("\\cmd")
+            || s.contains("\\powershell")
     }
 
     /// Get the line number from a span
@@ -997,8 +997,7 @@ impl<'a> ShellCommandVisitor<'a> {
 
     /// Create a finding for a detected shell command pattern
     fn create_finding(&mut self, line: usize, pattern_found: &str, summary: &str) {
-        let (context_before, snippet, context_after) =
-            extract_snippet(self.source, line, line, 3);
+        let (context_before, snippet, context_after) = extract_snippet(self.source, line, line, 3);
 
         let finding = Finding::new(
             IssueType::ShellCommand,
@@ -1054,10 +1053,11 @@ impl<'a> Visit<'a> for ShellCommandVisitor<'a> {
 
             // Detect Command::new() specifically
             if path_str == "Command::new" || path_str.ends_with("::Command::new") {
-                let line = self.get_line_number(path.segments.first().map_or_else(
-                    || proc_macro2::Span::call_site(),
-                    |s| s.ident.span(),
-                ));
+                let line = self.get_line_number(
+                    path.segments
+                        .first()
+                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                );
 
                 // Check if the argument is a shell name
                 let shell_name = node.args.first().and_then(|arg| {
@@ -1070,7 +1070,10 @@ impl<'a> Visit<'a> for ShellCommandVisitor<'a> {
 
                 let summary = if let Some(ref name) = shell_name {
                     if Self::is_shell_name(name) {
-                        format!("Shell command execution detected: Command::new(\"{}\")", name)
+                        format!(
+                            "Shell command execution detected: Command::new(\"{}\")",
+                            name
+                        )
                     } else {
                         format!("Command execution detected: Command::new(\"{}\")", name)
                     }
@@ -1080,10 +1083,11 @@ impl<'a> Visit<'a> for ShellCommandVisitor<'a> {
 
                 self.create_finding(line, "Command::new", &summary);
             } else if Self::matches_shell_pattern(&path_str) {
-                let line = self.get_line_number(path.segments.first().map_or_else(
-                    || proc_macro2::Span::call_site(),
-                    |s| s.ident.span(),
-                ));
+                let line = self.get_line_number(
+                    path.segments
+                        .first()
+                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                );
                 let pattern = SHELL_COMMAND_PATTERNS
                     .iter()
                     .find(|p| path_str.contains(*p))
@@ -1103,7 +1107,16 @@ impl<'a> Visit<'a> for ShellCommandVisitor<'a> {
         let method_name = node.method.to_string();
 
         // Check for Command method chain calls: .arg(), .args(), .spawn(), .output(), .status()
-        let command_methods = ["arg", "args", "spawn", "output", "status", "current_dir", "env", "envs"];
+        let command_methods = [
+            "arg",
+            "args",
+            "spawn",
+            "output",
+            "status",
+            "current_dir",
+            "env",
+            "envs",
+        ];
 
         if command_methods.contains(&method_name.as_str()) {
             // For .arg() calls, check if the argument is suspicious
@@ -1117,7 +1130,10 @@ impl<'a> Visit<'a> for ShellCommandVisitor<'a> {
                                 self.create_finding(
                                     line,
                                     &arg_value,
-                                    &format!("Suspicious shell argument detected: .{}(\"{}\")", method_name, arg_value),
+                                    &format!(
+                                        "Suspicious shell argument detected: .{}(\"{}\")",
+                                        method_name, arg_value
+                                    ),
                                 );
                             }
                         }
@@ -1133,7 +1149,10 @@ impl<'a> Visit<'a> for ShellCommandVisitor<'a> {
                     self.create_finding(
                         line,
                         &method_name,
-                        &format!("Command method call detected: {}.{}()", path_str, method_name),
+                        &format!(
+                            "Command method call detected: {}.{}()",
+                            path_str, method_name
+                        ),
                     );
                 }
             }
@@ -1211,8 +1230,7 @@ impl<'a> ProcessSpawnVisitor<'a> {
 
     /// Create a finding for a detected process spawn pattern
     fn create_finding(&mut self, line: usize, pattern_found: &str, summary: &str) {
-        let (context_before, snippet, context_after) =
-            extract_snippet(self.source, line, line, 3);
+        let (context_before, snippet, context_after) = extract_snippet(self.source, line, line, 3);
 
         let finding = Finding::new(
             IssueType::ProcessSpawn,
@@ -1258,10 +1276,11 @@ impl<'a> Visit<'a> for ProcessSpawnVisitor<'a> {
             let path_str = format_path(path);
 
             if Self::matches_process_spawn_pattern(&path_str) {
-                let line = self.get_line_number(path.segments.first().map_or_else(
-                    || proc_macro2::Span::call_site(),
-                    |s| s.ident.span(),
-                ));
+                let line = self.get_line_number(
+                    path.segments
+                        .first()
+                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                );
                 let pattern = PROCESS_SPAWN_PATTERNS
                     .iter()
                     .find(|p| path_str.contains(*p))
@@ -1378,8 +1397,7 @@ impl<'a> EnvAccessVisitor<'a> {
         summary: &str,
         is_sensitive: bool,
     ) {
-        let (context_before, snippet, context_after) =
-            extract_snippet(self.source, line, line, 3);
+        let (context_before, snippet, context_after) = extract_snippet(self.source, line, line, 3);
 
         // Sensitive env var access is High severity, general env access is Low
         let severity = if is_sensitive {
@@ -1444,10 +1462,11 @@ impl<'a> Visit<'a> for EnvAccessVisitor<'a> {
 
             // Detect env::var(), env::var_os(), etc.
             if Self::matches_env_pattern(&path_str) {
-                let line = self.get_line_number(path.segments.first().map_or_else(
-                    || proc_macro2::Span::call_site(),
-                    |s| s.ident.span(),
-                ));
+                let line = self.get_line_number(
+                    path.segments
+                        .first()
+                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                );
 
                 // Check if accessing a sensitive env var
                 let env_var_name = node.args.first().and_then(|arg| {
@@ -1466,7 +1485,10 @@ impl<'a> Visit<'a> for EnvAccessVisitor<'a> {
                             path_str, name
                         )
                     } else {
-                        format!("Environment variable access detected: {}(\"{}\")", path_str, name)
+                        format!(
+                            "Environment variable access detected: {}(\"{}\")",
+                            path_str, name
+                        )
                     };
                     (summary, sensitive)
                 } else {
@@ -1603,8 +1625,7 @@ impl<'a> DynamicLibVisitor<'a> {
 
     /// Create a finding for a detected dynamic library pattern
     fn create_finding(&mut self, line: usize, pattern_found: &str, summary: &str) {
-        let (context_before, snippet, context_after) =
-            extract_snippet(self.source, line, line, 3);
+        let (context_before, snippet, context_after) = extract_snippet(self.source, line, line, 3);
 
         let finding = Finding::new(
             IssueType::DynamicLib,
@@ -1649,10 +1670,11 @@ impl<'a> Visit<'a> for DynamicLibVisitor<'a> {
         if let Expr::Path(ExprPath { path, .. }) = &*node.func {
             let path_str = format_path(path);
             if Self::matches_dynamic_lib_pattern(&path_str) {
-                let line = self.get_line_number(path.segments.first().map_or_else(
-                    || proc_macro2::Span::call_site(),
-                    |s| s.ident.span(),
-                ));
+                let line = self.get_line_number(
+                    path.segments
+                        .first()
+                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                );
                 let pattern = DYNAMIC_LIB_PATTERNS
                     .iter()
                     .find(|p| path_str.contains(*p))
@@ -1679,7 +1701,10 @@ impl<'a> Visit<'a> for DynamicLibVisitor<'a> {
                 self.create_finding(
                     line,
                     &path_str,
-                    &format!("Dynamic library method call detected: {}.{}", path_str, method_name),
+                    &format!(
+                        "Dynamic library method call detected: {}.{}",
+                        path_str, method_name
+                    ),
                 );
             }
         }
@@ -1706,7 +1731,10 @@ impl<'a> Visit<'a> for DynamicLibVisitor<'a> {
                 self.create_finding(
                     line,
                     &method_name,
-                    &format!("Potential dynamic library method call: {}.{}()", receiver_str, method_name),
+                    &format!(
+                        "Potential dynamic library method call: {}.{}()",
+                        receiver_str, method_name
+                    ),
                 );
             }
         }
@@ -1854,13 +1882,7 @@ const RAW_POINTER_PATTERNS: &[&str] = &[
 
 /// FFI-related patterns within unsafe blocks
 const FFI_PATTERNS: &[&str] = &[
-    "extern",
-    "libc::",
-    "winapi::",
-    "ffi::",
-    "c_void",
-    "CStr",
-    "CString",
+    "extern", "libc::", "winapi::", "ffi::", "c_void", "CStr", "CString",
 ];
 
 /// Visitor that walks the AST looking for unsafe blocks
@@ -1966,12 +1988,7 @@ impl<'a> Visit<'a> for UnsafeBlockVisitor<'a> {
     /// Visit unsafe blocks in expressions
     fn visit_expr_unsafe(&mut self, node: &'a ExprUnsafe) {
         let start_line = self.get_line_number(node.unsafe_token.span);
-        let end_line = self.get_end_line_number(
-            node.block
-                .brace_token
-                .span
-                .close(),
-        );
+        let end_line = self.get_end_line_number(node.block.brace_token.span.close());
 
         let stmt_count = Self::count_statements(&node.block);
         let source_snippet = self.extract_source_lines(start_line, end_line);
@@ -2032,7 +2049,8 @@ impl<'a> Visit<'a> for UnsafeBlockVisitor<'a> {
                 start_line
             };
 
-            let source_snippet = self.extract_source_lines(start_line, end_line.min(start_line + 20));
+            let source_snippet =
+                self.extract_source_lines(start_line, end_line.min(start_line + 20));
             let has_raw_pointers = Self::contains_raw_pointer_operations(&source_snippet);
             let has_ffi = Self::contains_ffi_patterns(&source_snippet);
 
@@ -2050,13 +2068,7 @@ impl<'a> Visit<'a> for UnsafeBlockVisitor<'a> {
                 }
             );
 
-            self.create_finding(
-                start_line,
-                start_line,
-                "unsafe_fn",
-                &summary,
-                is_suspicious,
-            );
+            self.create_finding(start_line, start_line, "unsafe_fn", &summary, is_suspicious);
         }
 
         // Continue visiting the function body
@@ -2129,8 +2141,7 @@ impl<'a> SensitivePathVisitor<'a> {
 
     /// Create a finding for a detected sensitive path access
     fn create_finding(&mut self, line: usize, path_detected: &str, summary: &str) {
-        let (context_before, snippet, context_after) =
-            extract_snippet(self.source, line, line, 3);
+        let (context_before, snippet, context_after) = extract_snippet(self.source, line, line, 3);
 
         let finding = Finding::new(
             IssueType::SensitivePath,
@@ -2203,11 +2214,10 @@ impl<'a> Visit<'a> for SensitivePathVisitor<'a> {
                     if let Expr::Lit(ExprLit { lit, .. }) = arg {
                         if let Some(arg_str) = Self::extract_string_literal(lit) {
                             if let Some(pattern) = Self::contains_sensitive_path(&arg_str) {
-                                let line = self.get_line_number(
-                                    path.segments
-                                        .first()
-                                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
-                                );
+                                let line = self.get_line_number(path.segments.first().map_or_else(
+                                    || proc_macro2::Span::call_site(),
+                                    |s| s.ident.span(),
+                                ));
                                 self.create_finding(
                                     line,
                                     &arg_str,
@@ -2267,10 +2277,7 @@ impl<'a> Visit<'a> for SensitivePathVisitor<'a> {
         }
 
         // Check for read operations on paths
-        if method_name == "read_to_string"
-            || method_name == "read"
-            || method_name == "read_dir"
-        {
+        if method_name == "read_to_string" || method_name == "read" || method_name == "read_dir" {
             // Check if the receiver or earlier parts of the chain contain sensitive paths
             // This is handled by the literal check
         }
@@ -2559,8 +2566,7 @@ impl<'a> ObfuscationVisitor<'a> {
 
     /// Create a finding for a detected obfuscation pattern
     fn create_finding(&mut self, line: usize, pattern_found: &str, summary: &str) {
-        let (context_before, snippet, context_after) =
-            extract_snippet(self.source, line, line, 3);
+        let (context_before, snippet, context_after) = extract_snippet(self.source, line, line, 3);
 
         let finding = Finding::new(
             IssueType::Obfuscation,
@@ -2624,10 +2630,11 @@ impl<'a> Visit<'a> for ObfuscationVisitor<'a> {
             let path_str = format_path(path);
 
             if Self::matches_obfuscation_pattern(&path_str) {
-                let line = self.get_line_number(path.segments.first().map_or_else(
-                    || proc_macro2::Span::call_site(),
-                    |s| s.ident.span(),
-                ));
+                let line = self.get_line_number(
+                    path.segments
+                        .first()
+                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                );
                 let pattern = OBFUSCATION_PATTERNS
                     .iter()
                     .find(|p| path_str.contains(*p))
@@ -2658,9 +2665,15 @@ impl<'a> Visit<'a> for ObfuscationVisitor<'a> {
             };
 
             let summary = if receiver_str.contains("base64") || receiver_str.contains("STANDARD") {
-                format!("Base64 decoding detected: {}.{}() - could be hiding malicious payload", receiver_str, method_name)
+                format!(
+                    "Base64 decoding detected: {}.{}() - could be hiding malicious payload",
+                    receiver_str, method_name
+                )
             } else if receiver_str.contains("hex") {
-                format!("Hex decoding detected: {}.{}() - could be hiding malicious payload", receiver_str, method_name)
+                format!(
+                    "Hex decoding detected: {}.{}() - could be hiding malicious payload",
+                    receiver_str, method_name
+                )
             } else {
                 format!("Encoding/decoding method call detected: .{}()", method_name)
             };
@@ -2676,7 +2689,10 @@ impl<'a> Visit<'a> for ObfuscationVisitor<'a> {
                 self.create_finding(
                     line,
                     &path_str,
-                    &format!("Obfuscation method call detected: {}.{}()", path_str, method_name),
+                    &format!(
+                        "Obfuscation method call detected: {}.{}()",
+                        path_str, method_name
+                    ),
                 );
             }
         }
@@ -2693,16 +2709,22 @@ impl<'a> Visit<'a> for ObfuscationVisitor<'a> {
                 self.create_finding(
                     line,
                     "base64_string",
-                    &format!("String literal looks like base64 encoded data: \"{}...\" (length: {})",
-                        &s[..s.len().min(40)], s.len()),
+                    &format!(
+                        "String literal looks like base64 encoded data: \"{}...\" (length: {})",
+                        &s[..s.len().min(40)],
+                        s.len()
+                    ),
                 );
             } else if Self::looks_like_hex(&s) {
                 let line = self.get_line_number(node.lit.span());
                 self.create_finding(
                     line,
                     "hex_string",
-                    &format!("String literal looks like hex encoded data: \"{}...\" (length: {})",
-                        &s[..s.len().min(40)], s.len()),
+                    &format!(
+                        "String literal looks like hex encoded data: \"{}...\" (length: {})",
+                        &s[..s.len().min(40)],
+                        s.len()
+                    ),
                 );
             }
         }
@@ -2714,7 +2736,10 @@ impl<'a> Visit<'a> for ObfuscationVisitor<'a> {
                 self.create_finding(
                     line,
                     "encoded_bytes",
-                    &format!("Byte literal looks like encoded data (length: {} bytes, high entropy)", bytes.len()),
+                    &format!(
+                        "Byte literal looks like encoded data (length: {} bytes, high entropy)",
+                        bytes.len()
+                    ),
                 );
             }
         }
@@ -2798,8 +2823,7 @@ impl<'a> BuildDownloadVisitor<'a> {
 
     /// Create a finding for a detected build download pattern
     fn create_finding(&mut self, line: usize, pattern_found: &str, summary: &str) {
-        let (context_before, snippet, context_after) =
-            extract_snippet(self.source, line, line, 3);
+        let (context_before, snippet, context_after) = extract_snippet(self.source, line, line, 3);
 
         let finding = Finding::new(
             IssueType::BuildDownload,
@@ -2844,10 +2868,11 @@ impl<'a> Visit<'a> for BuildDownloadVisitor<'a> {
         if let Expr::Path(ExprPath { path, .. }) = &*node.func {
             let path_str = format_path(path);
             if Self::matches_build_download_pattern(&path_str) {
-                let line = self.get_line_number(path.segments.first().map_or_else(
-                    || proc_macro2::Span::call_site(),
-                    |s| s.ident.span(),
-                ));
+                let line = self.get_line_number(
+                    path.segments
+                        .first()
+                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                );
                 let pattern = BUILD_DOWNLOAD_PATTERNS
                     .iter()
                     .find(|p| path_str.to_lowercase().contains(&p.to_lowercase()))
@@ -2893,8 +2918,14 @@ impl<'a> Visit<'a> for BuildDownloadVisitor<'a> {
                 self.create_finding(
                     line,
                     pattern,
-                    &format!("Potential download URL detected: \"{}\"",
-                        if s.len() > 80 { format!("{}...", &s[..77]) } else { s.clone() }),
+                    &format!(
+                        "Potential download URL detected: \"{}\"",
+                        if s.len() > 80 {
+                            format!("{}...", &s[..77])
+                        } else {
+                            s.clone()
+                        }
+                    ),
                 );
             }
         }
@@ -2997,7 +3028,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::Network)
             .collect();
 
-        assert!(!network_findings.is_empty(), "Should detect std::net import");
+        assert!(
+            !network_findings.is_empty(),
+            "Should detect std::net import"
+        );
     }
 
     /// Test that the detector detects curl imports
@@ -3094,7 +3128,10 @@ async fn serve() {
             .filter(|f| f.issue_type == IssueType::Network)
             .collect();
 
-        assert!(!network_findings.is_empty(), "Should detect tokio::net import");
+        assert!(
+            !network_findings.is_empty(),
+            "Should detect tokio::net import"
+        );
     }
 
     /// Test that file access patterns are detected
@@ -3208,7 +3245,10 @@ fn setup() {
             .filter(|f| f.issue_type == IssueType::FileAccess)
             .collect();
 
-        assert!(!file_findings.is_empty(), "Should detect directory operations");
+        assert!(
+            !file_findings.is_empty(),
+            "Should detect directory operations"
+        );
     }
 
     /// Test detection of tokio async file operations
@@ -3254,7 +3294,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::ShellCommand)
             .collect();
 
-        assert!(!shell_findings.is_empty(), "Should detect Command::new(\"bash\")");
+        assert!(
+            !shell_findings.is_empty(),
+            "Should detect Command::new(\"bash\")"
+        );
         assert!(
             shell_findings.iter().any(|f| f.summary.contains("bash")),
             "Summary should mention bash"
@@ -3303,7 +3346,10 @@ fn main() {}
             .filter(|f| f.issue_type == IssueType::ShellCommand)
             .collect();
 
-        assert!(!shell_findings.is_empty(), "Should detect std::process::Command import");
+        assert!(
+            !shell_findings.is_empty(),
+            "Should detect std::process::Command import"
+        );
     }
 
     /// Test detection of different shell names
@@ -3368,7 +3414,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::ShellCommand)
             .collect();
 
-        assert!(!shell_findings.is_empty(), "Should detect shell command with -c arg");
+        assert!(
+            !shell_findings.is_empty(),
+            "Should detect shell command with -c arg"
+        );
         // Should have multiple findings: import, Command::new, and the -c argument
         assert!(
             shell_findings.iter().any(|f| f.summary.contains("-c")),
@@ -3476,7 +3525,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::ShellCommand)
             .collect();
 
-        assert!(!shell_findings.is_empty(), "Should detect /usr/bin/env command");
+        assert!(
+            !shell_findings.is_empty(),
+            "Should detect /usr/bin/env command"
+        );
     }
 
     // ========================================================================
@@ -3579,7 +3631,10 @@ fn main() {
             .filter(|f| f.summary.contains("GITHUB_TOKEN"))
             .collect();
 
-        assert!(!env_findings.is_empty(), "Should detect GITHUB_TOKEN access");
+        assert!(
+            !env_findings.is_empty(),
+            "Should detect GITHUB_TOKEN access"
+        );
         assert_eq!(
             env_findings[0].severity,
             sus_core::Severity::High,
@@ -3612,7 +3667,9 @@ fn exfiltrate() {
             "Should detect both AWS credential accesses"
         );
         assert!(
-            env_findings.iter().all(|f| f.severity == sus_core::Severity::High),
+            env_findings
+                .iter()
+                .all(|f| f.severity == sus_core::Severity::High),
             "All AWS credential accesses should be High severity"
         );
     }
@@ -3647,7 +3704,8 @@ fn main() { let sock = env::var("SSH_AUTH_SOCK").unwrap(); }
             .filter(|f| f.issue_type == IssueType::EnvAccess && f.summary.contains("SSH_AUTH_SOCK"))
             .collect();
         assert!(
-            !env_findings_ssh.is_empty() && env_findings_ssh[0].severity == sus_core::Severity::High,
+            !env_findings_ssh.is_empty()
+                && env_findings_ssh[0].severity == sus_core::Severity::High,
             "SSH_AUTH_SOCK should be High severity"
         );
 
@@ -3662,7 +3720,8 @@ fn main() { let token = env::var("NPM_TOKEN").unwrap(); }
             .filter(|f| f.issue_type == IssueType::EnvAccess && f.summary.contains("NPM_TOKEN"))
             .collect();
         assert!(
-            !env_findings_npm.is_empty() && env_findings_npm[0].severity == sus_core::Severity::High,
+            !env_findings_npm.is_empty()
+                && env_findings_npm[0].severity == sus_core::Severity::High,
             "NPM_TOKEN should be High severity"
         );
     }
@@ -3760,7 +3819,10 @@ fn poison() {
             .filter(|f| f.summary.contains("set_var") || f.summary.contains("PATH"))
             .collect();
 
-        assert!(!env_findings.is_empty(), "Should detect env::set_var() call");
+        assert!(
+            !env_findings.is_empty(),
+            "Should detect env::set_var() call"
+        );
     }
 
     /// Test that sensitive keyword patterns are detected (e.g., MY_API_KEY)
@@ -3866,11 +3928,14 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::UnsafeBlock)
             .collect();
 
-        assert!(!unsafe_findings.is_empty(), "Should detect large unsafe block");
+        assert!(
+            !unsafe_findings.is_empty(),
+            "Should detect large unsafe block"
+        );
         // Large unsafe blocks should be flagged as suspicious
         assert!(
-            unsafe_findings[0].summary.contains("large block") ||
-            unsafe_findings[0].summary.contains("statements"),
+            unsafe_findings[0].summary.contains("large block")
+                || unsafe_findings[0].summary.contains("statements"),
             "Should mention large block in summary"
         );
     }
@@ -3894,7 +3959,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::UnsafeBlock)
             .collect();
 
-        assert!(!unsafe_findings.is_empty(), "Should detect unsafe block with raw pointer");
+        assert!(
+            !unsafe_findings.is_empty(),
+            "Should detect unsafe block with raw pointer"
+        );
     }
 
     /// Test detection of transmute (particularly dangerous)
@@ -3915,10 +3983,15 @@ fn dangerous() {
             .filter(|f| f.issue_type == IssueType::UnsafeBlock)
             .collect();
 
-        assert!(!unsafe_findings.is_empty(), "Should detect transmute in unsafe block");
+        assert!(
+            !unsafe_findings.is_empty(),
+            "Should detect transmute in unsafe block"
+        );
         // Transmute should be flagged as raw pointer manipulation
         assert!(
-            unsafe_findings.iter().any(|f| f.summary.contains("raw pointer")),
+            unsafe_findings
+                .iter()
+                .any(|f| f.summary.contains("raw pointer")),
             "Should flag transmute as raw pointer manipulation"
         );
     }
@@ -3943,7 +4016,9 @@ fn main() {}
 
         assert!(!unsafe_findings.is_empty(), "Should detect unsafe function");
         assert!(
-            unsafe_findings.iter().any(|f| f.summary.contains("Unsafe function")),
+            unsafe_findings
+                .iter()
+                .any(|f| f.summary.contains("Unsafe function")),
             "Should mention unsafe function in summary"
         );
     }
@@ -3969,7 +4044,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::UnsafeBlock)
             .collect();
 
-        assert!(!unsafe_findings.is_empty(), "Should detect FFI in unsafe block");
+        assert!(
+            !unsafe_findings.is_empty(),
+            "Should detect FFI in unsafe block"
+        );
     }
 
     /// Test that raw pointer manipulation has Medium severity (elevated from Low)
@@ -3992,7 +4070,10 @@ fn main() {
             .filter(|f| f.summary.contains("raw pointer"))
             .collect();
 
-        assert!(!unsafe_findings.is_empty(), "Should detect raw pointer operations");
+        assert!(
+            !unsafe_findings.is_empty(),
+            "Should detect raw pointer operations"
+        );
         assert_eq!(
             unsafe_findings[0].severity,
             sus_core::Severity::Medium,
@@ -4020,9 +4101,14 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::UnsafeBlock)
             .collect();
 
-        assert!(!unsafe_findings.is_empty(), "Should detect from_raw_parts in unsafe");
         assert!(
-            unsafe_findings.iter().any(|f| f.summary.contains("raw pointer")),
+            !unsafe_findings.is_empty(),
+            "Should detect from_raw_parts in unsafe"
+        );
+        assert!(
+            unsafe_findings
+                .iter()
+                .any(|f| f.summary.contains("raw pointer")),
             "Should flag from_raw_parts as raw pointer manipulation"
         );
     }
@@ -4047,9 +4133,14 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::UnsafeBlock)
             .collect();
 
-        assert!(!unsafe_findings.is_empty(), "Should detect pointer offset in unsafe");
         assert!(
-            unsafe_findings.iter().any(|f| f.summary.contains("raw pointer")),
+            !unsafe_findings.is_empty(),
+            "Should detect pointer offset in unsafe"
+        );
+        assert!(
+            unsafe_findings
+                .iter()
+                .any(|f| f.summary.contains("raw pointer")),
             "Should flag offset as raw pointer manipulation"
         );
     }
@@ -4138,9 +4229,14 @@ fn steal_keys() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect ~/.ssh access");
         assert!(
-            sensitive_findings.iter().any(|f| f.summary.contains(".ssh") || f.summary.contains("id_rsa")),
+            !sensitive_findings.is_empty(),
+            "Should detect ~/.ssh access"
+        );
+        assert!(
+            sensitive_findings
+                .iter()
+                .any(|f| f.summary.contains(".ssh") || f.summary.contains("id_rsa")),
             "Summary should mention .ssh or id_rsa"
         );
     }
@@ -4161,7 +4257,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect /etc/passwd access");
+        assert!(
+            !sensitive_findings.is_empty(),
+            "Should detect /etc/passwd access"
+        );
         assert_eq!(
             sensitive_findings[0].severity,
             sus_core::Severity::High,
@@ -4187,9 +4286,14 @@ fn steal_aws() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect ~/.aws access");
         assert!(
-            sensitive_findings.iter().any(|f| f.summary.contains(".aws") || f.summary.contains("credentials")),
+            !sensitive_findings.is_empty(),
+            "Should detect ~/.aws access"
+        );
+        assert!(
+            sensitive_findings
+                .iter()
+                .any(|f| f.summary.contains(".aws") || f.summary.contains("credentials")),
             "Summary should mention .aws or credentials"
         );
     }
@@ -4210,7 +4314,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect /etc/shadow access");
+        assert!(
+            !sensitive_findings.is_empty(),
+            "Should detect /etc/shadow access"
+        );
     }
 
     /// Test detection of Path::new() with sensitive path
@@ -4231,7 +4338,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect Path::new with sensitive path");
+        assert!(
+            !sensitive_findings.is_empty(),
+            "Should detect Path::new with sensitive path"
+        );
     }
 
     /// Test detection of path.join() with sensitive path
@@ -4253,7 +4363,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect path.join() with .ssh");
+        assert!(
+            !sensitive_findings.is_empty(),
+            "Should detect path.join() with .ssh"
+        );
     }
 
     /// Test detection of .env file access
@@ -4272,7 +4385,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect .env file access");
+        assert!(
+            !sensitive_findings.is_empty(),
+            "Should detect .env file access"
+        );
     }
 
     /// Test detection of browser data access
@@ -4291,7 +4407,10 @@ fn steal_cookies() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect browser data access");
+        assert!(
+            !sensitive_findings.is_empty(),
+            "Should detect browser data access"
+        );
     }
 
     /// Test detection of shell history access
@@ -4310,7 +4429,10 @@ fn exfiltrate_history() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect .bash_history access");
+        assert!(
+            !sensitive_findings.is_empty(),
+            "Should detect .bash_history access"
+        );
     }
 
     /// Test detection of Kubernetes config access
@@ -4329,7 +4451,10 @@ fn steal_kube_config() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect .kube/config access");
+        assert!(
+            !sensitive_findings.is_empty(),
+            "Should detect .kube/config access"
+        );
     }
 
     /// Test detection of docker config access
@@ -4348,7 +4473,10 @@ fn steal_docker_creds() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect .docker/config.json access");
+        assert!(
+            !sensitive_findings.is_empty(),
+            "Should detect .docker/config.json access"
+        );
     }
 
     /// Test context extraction for sensitive path findings
@@ -4370,7 +4498,10 @@ fn steal() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect sensitive path");
+        assert!(
+            !sensitive_findings.is_empty(),
+            "Should detect sensitive path"
+        );
         let finding = &sensitive_findings[0];
 
         // Context should include surrounding lines
@@ -4401,7 +4532,10 @@ fn main() {
         assert!(
             sensitive_findings.is_empty(),
             "Non-sensitive paths should not be flagged, found: {:?}",
-            sensitive_findings.iter().map(|f| &f.summary).collect::<Vec<_>>()
+            sensitive_findings
+                .iter()
+                .map(|f| &f.summary)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -4421,7 +4555,10 @@ fn steal_keys() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect private_key in path");
+        assert!(
+            !sensitive_findings.is_empty(),
+            "Should detect private_key in path"
+        );
     }
 
     /// Test detection of NPM tokens
@@ -4440,7 +4577,10 @@ fn steal_npm_token() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect .npmrc access");
+        assert!(
+            !sensitive_findings.is_empty(),
+            "Should detect .npmrc access"
+        );
     }
 
     /// Test detection of git credentials
@@ -4459,7 +4599,10 @@ fn steal_git_creds() {
             .filter(|f| f.issue_type == IssueType::SensitivePath)
             .collect();
 
-        assert!(!sensitive_findings.is_empty(), "Should detect .git-credentials access");
+        assert!(
+            !sensitive_findings.is_empty(),
+            "Should detect .git-credentials access"
+        );
     }
 
     // ========================================================================
@@ -4484,9 +4627,14 @@ fn decode_payload() {
             .filter(|f| f.issue_type == IssueType::Obfuscation)
             .collect();
 
-        assert!(!obfuscation_findings.is_empty(), "Should detect base64 import");
         assert!(
-            obfuscation_findings.iter().any(|f| f.summary.contains("base64")),
+            !obfuscation_findings.is_empty(),
+            "Should detect base64 import"
+        );
+        assert!(
+            obfuscation_findings
+                .iter()
+                .any(|f| f.summary.contains("base64")),
             "Summary should mention base64"
         );
     }
@@ -4511,7 +4659,9 @@ fn decode_payload() {
 
         assert!(!obfuscation_findings.is_empty(), "Should detect hex import");
         assert!(
-            obfuscation_findings.iter().any(|f| f.summary.contains("hex")),
+            obfuscation_findings
+                .iter()
+                .any(|f| f.summary.contains("hex")),
             "Summary should mention hex"
         );
     }
@@ -4534,7 +4684,10 @@ fn decode() {
             .filter(|f| f.issue_type == IssueType::Obfuscation)
             .collect();
 
-        assert!(!obfuscation_findings.is_empty(), "Should detect obfuscation pattern");
+        assert!(
+            !obfuscation_findings.is_empty(),
+            "Should detect obfuscation pattern"
+        );
         assert_eq!(
             obfuscation_findings[0].severity,
             sus_core::Severity::High,
@@ -4560,7 +4713,10 @@ fn decode_malware() {
             .filter(|f| f.summary.contains("decode"))
             .collect();
 
-        assert!(!obfuscation_findings.is_empty(), "Should detect .decode() method");
+        assert!(
+            !obfuscation_findings.is_empty(),
+            "Should detect .decode() method"
+        );
     }
 
     /// Test detection of hex decode method call
@@ -4581,7 +4737,10 @@ fn decode_hex() {
             .filter(|f| f.summary.contains("decode"))
             .collect();
 
-        assert!(!obfuscation_findings.is_empty(), "Should detect decode method");
+        assert!(
+            !obfuscation_findings.is_empty(),
+            "Should detect decode method"
+        );
     }
 
     /// Test detection of base64 encoded string literals
@@ -4602,7 +4761,10 @@ fn hidden_payload() {
             .filter(|f| f.summary.contains("base64"))
             .collect();
 
-        assert!(!obfuscation_findings.is_empty(), "Should detect base64-like string literal");
+        assert!(
+            !obfuscation_findings.is_empty(),
+            "Should detect base64-like string literal"
+        );
     }
 
     /// Test detection of hex encoded string literals
@@ -4623,7 +4785,10 @@ fn hidden_hex() {
             .filter(|f| f.summary.contains("hex"))
             .collect();
 
-        assert!(!obfuscation_findings.is_empty(), "Should detect hex-like string literal");
+        assert!(
+            !obfuscation_findings.is_empty(),
+            "Should detect hex-like string literal"
+        );
     }
 
     /// Test detection of compression crates (flate2, gzip)
@@ -4644,7 +4809,10 @@ fn decompress_payload() {
             .filter(|f| f.issue_type == IssueType::Obfuscation)
             .collect();
 
-        assert!(!obfuscation_findings.is_empty(), "Should detect flate2/compression import");
+        assert!(
+            !obfuscation_findings.is_empty(),
+            "Should detect flate2/compression import"
+        );
     }
 
     /// Test detection of encryption crate imports
@@ -4665,7 +4833,10 @@ fn decrypt_payload() {
             .filter(|f| f.issue_type == IssueType::Obfuscation)
             .collect();
 
-        assert!(!obfuscation_findings.is_empty(), "Should detect aes/encryption import");
+        assert!(
+            !obfuscation_findings.is_empty(),
+            "Should detect aes/encryption import"
+        );
     }
 
     /// Test that context is extracted for obfuscation findings
@@ -4687,7 +4858,10 @@ use base64;
             .filter(|f| f.issue_type == IssueType::Obfuscation)
             .collect();
 
-        assert!(!obfuscation_findings.is_empty(), "Should detect base64 import");
+        assert!(
+            !obfuscation_findings.is_empty(),
+            "Should detect base64 import"
+        );
         let finding = &obfuscation_findings[0];
 
         // Context should include surrounding lines
@@ -4719,7 +4893,10 @@ fn normal_code() {
         assert!(
             obfuscation_findings.is_empty(),
             "Normal strings should not be flagged as obfuscation, found: {:?}",
-            obfuscation_findings.iter().map(|f| &f.summary).collect::<Vec<_>>()
+            obfuscation_findings
+                .iter()
+                .map(|f| &f.summary)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -4741,7 +4918,10 @@ fn decode_crypto() {
             .filter(|f| f.issue_type == IssueType::Obfuscation)
             .collect();
 
-        assert!(!obfuscation_findings.is_empty(), "Should detect bs58/base58 import");
+        assert!(
+            !obfuscation_findings.is_empty(),
+            "Should detect bs58/base58 import"
+        );
     }
 
     /// Test detection of xor cipher patterns
@@ -4762,7 +4942,10 @@ fn decrypt_xor() {
             .filter(|f| f.issue_type == IssueType::Obfuscation)
             .collect();
 
-        assert!(!obfuscation_findings.is_empty(), "Should detect xor_cipher import");
+        assert!(
+            !obfuscation_findings.is_empty(),
+            "Should detect xor_cipher import"
+        );
     }
 
     /// Test detection of line numbers for obfuscation findings
@@ -4782,7 +4965,10 @@ use base64;
             .filter(|f| f.issue_type == IssueType::Obfuscation)
             .collect();
 
-        assert!(!obfuscation_findings.is_empty(), "Should detect base64 import");
+        assert!(
+            !obfuscation_findings.is_empty(),
+            "Should detect base64 import"
+        );
         let finding = &obfuscation_findings[0];
 
         // Line number should be 4 (1-indexed, where "use base64;" is)
@@ -5018,10 +5204,7 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::DynamicLib)
             .collect();
 
-        assert!(
-            !dynamic_lib_findings.is_empty(),
-            "Should detect RTLD flags"
-        );
+        assert!(!dynamic_lib_findings.is_empty(), "Should detect RTLD flags");
     }
 
     /// Test detection of Library::new() method call
@@ -5156,7 +5339,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::ProcessSpawn)
             .collect();
 
-        assert!(!process_findings.is_empty(), "Should detect nix::unistd::fork import");
+        assert!(
+            !process_findings.is_empty(),
+            "Should detect nix::unistd::fork import"
+        );
         assert!(
             process_findings.iter().any(|f| f.summary.contains("fork")),
             "Summary should mention fork"
@@ -5186,7 +5372,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::ProcessSpawn)
             .collect();
 
-        assert!(!process_findings.is_empty(), "Should detect libc::fork call");
+        assert!(
+            !process_findings.is_empty(),
+            "Should detect libc::fork call"
+        );
     }
 
     /// Test that process spawn has Medium severity
@@ -5231,7 +5420,10 @@ async fn run_cmd() {
             .filter(|f| f.issue_type == IssueType::ProcessSpawn)
             .collect();
 
-        assert!(!process_findings.is_empty(), "Should detect tokio::process import");
+        assert!(
+            !process_findings.is_empty(),
+            "Should detect tokio::process import"
+        );
     }
 
     /// Test detection of execve call
@@ -5258,7 +5450,9 @@ fn main() {
 
         assert!(!process_findings.is_empty(), "Should detect execve import");
         assert!(
-            process_findings.iter().any(|f| f.summary.contains("execve")),
+            process_findings
+                .iter()
+                .any(|f| f.summary.contains("execve")),
             "Summary should mention execve"
         );
     }
@@ -5282,7 +5476,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::ProcessSpawn)
             .collect();
 
-        assert!(!process_findings.is_empty(), "Should detect subprocess crate");
+        assert!(
+            !process_findings.is_empty(),
+            "Should detect subprocess crate"
+        );
     }
 
     /// Test detection of libc::posix_spawn
@@ -5328,9 +5525,15 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::ProcessSpawn)
             .collect();
 
-        assert!(!process_findings.is_empty(), "Should detect process spawn methods");
+        assert!(
+            !process_findings.is_empty(),
+            "Should detect process spawn methods"
+        );
         // Should detect fork, wait, kill, terminate
-        assert!(process_findings.len() >= 3, "Should detect multiple spawn methods");
+        assert!(
+            process_findings.len() >= 3,
+            "Should detect multiple spawn methods"
+        );
     }
 
     /// Test detection of async_std::process
@@ -5351,7 +5554,10 @@ async fn run() {
             .filter(|f| f.issue_type == IssueType::ProcessSpawn)
             .collect();
 
-        assert!(!process_findings.is_empty(), "Should detect async_std::process");
+        assert!(
+            !process_findings.is_empty(),
+            "Should detect async_std::process"
+        );
     }
 
     /// Test detection of daemon/setsid (background process creation)
@@ -5398,8 +5604,14 @@ use nix::unistd::fork;
 
         assert!(!process_findings.is_empty(), "Should detect fork import");
         let finding = &process_findings[0];
-        assert!(!finding.context_before.is_empty(), "Should have context before");
-        assert!(!finding.context_after.is_empty(), "Should have context after");
+        assert!(
+            !finding.context_before.is_empty(),
+            "Should have context before"
+        );
+        assert!(
+            !finding.context_after.is_empty(),
+            "Should have context after"
+        );
     }
 
     /// Test detection of libc::system (dangerous system call)
@@ -5490,7 +5702,10 @@ fn handle_child(child: Child) {
             .filter(|f| f.issue_type == IssueType::ProcessSpawn)
             .collect();
 
-        assert!(!process_findings.is_empty(), "Should detect Child type reference");
+        assert!(
+            !process_findings.is_empty(),
+            "Should detect Child type reference"
+        );
     }
 
     // ==========================================================================
@@ -5580,7 +5795,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::BuildDownload)
             .collect();
 
-        assert!(!download_findings.is_empty(), "Should detect download function");
+        assert!(
+            !download_findings.is_empty(),
+            "Should detect download function"
+        );
     }
 
     /// Test detection of extract method call
@@ -5600,7 +5818,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::BuildDownload)
             .collect();
 
-        assert!(!download_findings.is_empty(), "Should detect extract method");
+        assert!(
+            !download_findings.is_empty(),
+            "Should detect extract method"
+        );
     }
 
     /// Test detection of GitHub releases URL
@@ -5619,7 +5840,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::BuildDownload)
             .collect();
 
-        assert!(!download_findings.is_empty(), "Should detect GitHub releases URL");
+        assert!(
+            !download_findings.is_empty(),
+            "Should detect GitHub releases URL"
+        );
     }
 
     /// Test detection of S3 URL pattern
@@ -5718,7 +5942,10 @@ fn main() {
             .collect();
 
         // Should detect tar import and unpack method
-        assert!(download_findings.len() >= 1, "Should detect archive operations");
+        assert!(
+            download_findings.len() >= 1,
+            "Should detect archive operations"
+        );
     }
 
     /// Test detection of cmake crate
@@ -5760,7 +5987,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::BuildDownload)
             .collect();
 
-        assert!(!download_findings.is_empty(), "Should detect prebuilt patterns");
+        assert!(
+            !download_findings.is_empty(),
+            "Should detect prebuilt patterns"
+        );
     }
 
     // ========================================================================
@@ -5812,12 +6042,13 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::CompilerFlags)
             .collect();
 
-        assert!(!flag_findings.is_empty(), "Should detect link-search directive");
+        assert!(
+            !flag_findings.is_empty(),
+            "Should detect link-search directive"
+        );
         // Link-search should be medium severity (suspicious)
         assert!(
-            flag_findings
-                .iter()
-                .any(|f| f.severity == Severity::Medium),
+            flag_findings.iter().any(|f| f.severity == Severity::Medium),
             "Link-search should have medium severity"
         );
     }
@@ -5838,7 +6069,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::CompilerFlags)
             .collect();
 
-        assert!(!flag_findings.is_empty(), "Should detect rustc-cfg directive");
+        assert!(
+            !flag_findings.is_empty(),
+            "Should detect rustc-cfg directive"
+        );
         // cfg should be low severity (benign)
         assert!(
             flag_findings.iter().any(|f| f.severity == Severity::Low),
@@ -5862,12 +6096,13 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::CompilerFlags)
             .collect();
 
-        assert!(!flag_findings.is_empty(), "Should detect rustc-env directive");
+        assert!(
+            !flag_findings.is_empty(),
+            "Should detect rustc-env directive"
+        );
         // rustc-env should be medium severity (suspicious)
         assert!(
-            flag_findings
-                .iter()
-                .any(|f| f.severity == Severity::Medium),
+            flag_findings.iter().any(|f| f.severity == Severity::Medium),
             "rustc-env should have medium severity"
         );
     }
@@ -5893,9 +6128,7 @@ fn main() {
             "Should detect rustc-link-arg directive"
         );
         assert!(
-            flag_findings
-                .iter()
-                .any(|f| f.severity == Severity::Medium),
+            flag_findings.iter().any(|f| f.severity == Severity::Medium),
             "rustc-link-arg should have medium severity"
         );
     }
@@ -5944,7 +6177,10 @@ fn main() {
             .filter(|f| f.issue_type == IssueType::CompilerFlags)
             .collect();
 
-        assert!(!flag_findings.is_empty(), "Should detect cargo:warning directive");
+        assert!(
+            !flag_findings.is_empty(),
+            "Should detect cargo:warning directive"
+        );
         assert!(
             flag_findings.iter().any(|f| f.severity == Severity::Low),
             "cargo:warning should have low severity"
@@ -6020,9 +6256,7 @@ fn main() {
             "Should detect deprecated rustc-flags directive"
         );
         assert!(
-            flag_findings
-                .iter()
-                .any(|f| f.severity == Severity::Medium),
+            flag_findings.iter().any(|f| f.severity == Severity::Medium),
             "Deprecated rustc-flags should have medium severity"
         );
     }
@@ -6048,10 +6282,7 @@ fn main() {
         assert!(!flag_findings.is_empty(), "Should detect directive");
         // Check that context is captured
         let finding = &flag_findings[0];
-        assert!(
-            !finding.code_snippet.is_empty(),
-            "Should have code snippet"
-        );
+        assert!(!finding.code_snippet.is_empty(), "Should have code snippet");
     }
 
     /// Test multiple compiler flags in one file

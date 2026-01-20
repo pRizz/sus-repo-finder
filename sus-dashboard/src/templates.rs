@@ -1,7 +1,10 @@
 //! HTML templates for the dashboard
 
 use askama::Template;
-use sus_core::{CrateWithStats, DashboardStats, FindingStatus, FindingWithStatus, RecentFinding, VersionWithStats};
+use sus_core::{
+    CrateWithStats, DashboardStats, FindingStatus, FindingWithStatus, RecentFinding,
+    VersionWithStats,
+};
 
 /// Filter to format download counts with K/M suffixes
 pub mod filters {

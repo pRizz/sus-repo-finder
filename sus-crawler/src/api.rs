@@ -14,7 +14,7 @@ use std::sync::Arc;
 use sus_core::Database;
 
 use crate::templates::StatusTemplate;
-use sus_crawler::{CrateDownloader, Crawler, CrawlerConfig, CratesIoClient};
+use sus_crawler::{CrateDownloader, CratesIoClient, Crawler, CrawlerConfig};
 use sus_detector::Detector;
 
 /// Wrapper for rendering Askama templates as HTML responses
@@ -51,10 +51,10 @@ pub fn create_router(db: Database) -> Router {
     let crates_io_client = CratesIoClient::new().expect("Failed to create crates.io client");
 
     // Create cache directory for downloaded crates
-    let cache_dir = std::env::var("CRATE_CACHE_DIR")
-        .unwrap_or_else(|_| "./data/crate_cache".to_string());
-    let crate_downloader = CrateDownloader::new(&cache_dir)
-        .expect("Failed to create crate downloader");
+    let cache_dir =
+        std::env::var("CRATE_CACHE_DIR").unwrap_or_else(|_| "./data/crate_cache".to_string());
+    let crate_downloader =
+        CrateDownloader::new(&cache_dir).expect("Failed to create crate downloader");
 
     let state = Arc::new(AppState {
         db: Arc::new(db),
@@ -75,21 +75,36 @@ pub fn create_router(db: Database) -> Router {
         // Test endpoint to fetch crate metadata from crates.io
         .route("/api/crawler/test-crate/{name}", get(test_crate))
         // Test endpoint to download and extract a crate
-        .route("/api/crawler/test-download/{name}/{version}", get(test_download))
+        .route(
+            "/api/crawler/test-download/{name}/{version}",
+            get(test_download),
+        )
         // Crawl and store endpoint: fetches from crates.io and stores in database
-        .route("/api/crawler/crawl-and-store/{name}", axum::routing::post(crawl_and_store))
+        .route(
+            "/api/crawler/crawl-and-store/{name}",
+            axum::routing::post(crawl_and_store),
+        )
         // Add a version to an existing crate (for testing)
         .route("/api/crawler/add-version", axum::routing::post(add_version))
         // Get stored crate endpoint: retrieves a crate from the database
         .route("/api/crawler/stored-crate/{name}", get(get_stored_crate))
         // Store an analysis result (finding) in the database
-        .route("/api/crawler/store-finding", axum::routing::post(store_finding))
+        .route(
+            "/api/crawler/store-finding",
+            axum::routing::post(store_finding),
+        )
         // Get all findings for a specific crate version
-        .route("/api/crawler/findings/{crate_name}/{version}", get(get_findings))
+        .route(
+            "/api/crawler/findings/{crate_name}/{version}",
+            get(get_findings),
+        )
         // Analyze a crate's build.rs file for suspicious patterns
         .route("/api/crawler/analyze/{name}/{version}", get(analyze_crate))
         // Test the detector on inline code
-        .route("/api/crawler/test-detector", axum::routing::post(test_detector))
+        .route(
+            "/api/crawler/test-detector",
+            axum::routing::post(test_detector),
+        )
         .with_state(state)
 }
 
@@ -97,13 +112,12 @@ pub fn create_router(db: Database) -> Router {
 async fn index() -> impl IntoResponse {
     // TODO: Fetch real stats from database when crawler is implemented
     let template = StatusTemplate::new(
-        "idle",
-        0,     // crates_scanned
-        0,     // findings_count
-        0,     // errors_count
-        0,     // queue_size
-        None,  // current_crate
-        0.0,   // progress_percent
+        "idle", 0,    // crates_scanned
+        0,    // findings_count
+        0,    // errors_count
+        0,    // queue_size
+        None, // current_crate
+        0.0,  // progress_percent
     );
 
     HtmlTemplate(template)
@@ -228,21 +242,23 @@ async fn test_download(
     Path((name, version)): Path<(String, String)>,
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    match state.crate_downloader.download_and_extract(&name, &version).await {
-        Ok(extracted) => {
-            Json(json!({
-                "success": true,
-                "extracted": {
-                    "crate_name": extracted.crate_name,
-                    "version": extracted.version,
-                    "path": extracted.path.to_string_lossy(),
-                    "has_build_rs": extracted.has_build_rs,
-                    "build_rs_path": extracted.build_rs_path.map(|p| p.to_string_lossy().to_string()),
-                    "is_proc_macro": extracted.is_proc_macro
-                }
-            }))
-            .into_response()
-        }
+    match state
+        .crate_downloader
+        .download_and_extract(&name, &version)
+        .await
+    {
+        Ok(extracted) => Json(json!({
+            "success": true,
+            "extracted": {
+                "crate_name": extracted.crate_name,
+                "version": extracted.version,
+                "path": extracted.path.to_string_lossy(),
+                "has_build_rs": extracted.has_build_rs,
+                "build_rs_path": extracted.build_rs_path.map(|p| p.to_string_lossy().to_string()),
+                "is_proc_macro": extracted.is_proc_macro
+            }
+        }))
+        .into_response(),
         Err(e) => {
             let error_message = e.to_string();
             (
@@ -318,14 +334,17 @@ async fn crawl_and_store(
 
     // Step 3: Download and analyze the latest version to get has_build_rs and is_proc_macro
     let latest_version = &metadata.max_version;
-    let (has_build_rs, is_proc_macro) =
-        match state.crate_downloader.download_and_extract(&name, latest_version).await {
-            Ok(extracted) => (extracted.has_build_rs, extracted.is_proc_macro),
-            Err(_) => {
-                // If download fails, store with defaults (we still have the metadata)
-                (false, false)
-            }
-        };
+    let (has_build_rs, is_proc_macro) = match state
+        .crate_downloader
+        .download_and_extract(&name, latest_version)
+        .await
+    {
+        Ok(extracted) => (extracted.has_build_rs, extracted.is_proc_macro),
+        Err(_) => {
+            // If download fails, store with defaults (we still have the metadata)
+            (false, false)
+        }
+    };
 
     // Step 4: Store the latest version in the database
     let version_id = match state
@@ -369,23 +388,21 @@ async fn get_stored_crate(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
 ) -> impl IntoResponse {
     match state.db.get_crate_by_name(&name).await {
-        Ok(Some(crate_info)) => {
-            Json(json!({
-                "success": true,
-                "crate": {
-                    "id": crate_info.id,
-                    "name": crate_info.name,
-                    "description": crate_info.description,
-                    "repo_url": crate_info.repo_url,
-                    "download_count": crate_info.download_count,
-                    "finding_count": crate_info.finding_count,
-                    "max_severity": crate_info.max_severity,
-                    "created_at": crate_info.created_at,
-                    "updated_at": crate_info.updated_at
-                }
-            }))
-            .into_response()
-        }
+        Ok(Some(crate_info)) => Json(json!({
+            "success": true,
+            "crate": {
+                "id": crate_info.id,
+                "name": crate_info.name,
+                "description": crate_info.description,
+                "repo_url": crate_info.repo_url,
+                "download_count": crate_info.download_count,
+                "finding_count": crate_info.finding_count,
+                "max_severity": crate_info.max_severity,
+                "created_at": crate_info.created_at,
+                "updated_at": crate_info.updated_at
+            }
+        }))
+        .into_response(),
         Ok(None) => (
             StatusCode::NOT_FOUND,
             Json(json!({
@@ -770,7 +787,11 @@ async fn analyze_crate(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
 ) -> impl IntoResponse {
     // Step 1: Download and extract the crate
-    let extracted = match state.crate_downloader.download_and_extract(&name, &version).await {
+    let extracted = match state
+        .crate_downloader
+        .download_and_extract(&name, &version)
+        .await
+    {
         Ok(extracted) => extracted,
         Err(e) => {
             return (

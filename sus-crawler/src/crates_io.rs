@@ -117,9 +117,7 @@ pub struct CratesIoClient {
 impl CratesIoClient {
     /// Create a new crates.io API client
     pub fn new() -> Result<Self, CratesIoError> {
-        let client = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .build()?;
+        let client = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
 
         Ok(Self {
             client,
@@ -130,9 +128,7 @@ impl CratesIoClient {
     /// Create a new client with a custom base URL (useful for testing)
     #[allow(dead_code)]
     pub fn with_base_url(base_url: &str) -> Result<Self, CratesIoError> {
-        let client = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .build()?;
+        let client = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
 
         Ok(Self {
             client,
@@ -271,7 +267,10 @@ mod tests {
     #[ignore] // Ignore by default since it makes network calls
     async fn test_fetch_serde_crate() {
         let client = CratesIoClient::new().expect("Failed to create client");
-        let response = client.get_crate("serde").await.expect("Failed to fetch serde");
+        let response = client
+            .get_crate("serde")
+            .await
+            .expect("Failed to fetch serde");
 
         // Step 1: Verify name
         assert_eq!(response.crate_data.name, "serde");
@@ -282,16 +281,10 @@ mod tests {
             "Description should be present"
         );
         let description = response.crate_data.description.as_ref().unwrap();
-        assert!(
-            !description.is_empty(),
-            "Description should not be empty"
-        );
+        assert!(!description.is_empty(), "Description should not be empty");
 
         // Step 3: Verify versions are returned
-        assert!(
-            !response.versions.is_empty(),
-            "Versions should be returned"
-        );
+        assert!(!response.versions.is_empty(), "Versions should be returned");
         // serde is a popular crate with many versions
         assert!(
             response.versions.len() > 10,

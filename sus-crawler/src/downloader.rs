@@ -71,9 +71,7 @@ impl CrateDownloader {
     ///
     /// * `cache_dir` - Directory where downloaded crates will be extracted
     pub fn new(cache_dir: impl AsRef<Path>) -> Result<Self, DownloadError> {
-        let client = reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .build()?;
+        let client = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
 
         let cache_dir = cache_dir.as_ref().to_path_buf();
 
@@ -202,15 +200,17 @@ impl CrateDownloader {
         // Decompress gzip
         let mut decoder = GzDecoder::new(tarball_data);
         let mut decompressed = Vec::new();
-        decoder.read_to_end(&mut decompressed).map_err(|e| {
-            DownloadError::Extraction(format!("Failed to decompress gzip: {}", e))
-        })?;
+        decoder
+            .read_to_end(&mut decompressed)
+            .map_err(|e| DownloadError::Extraction(format!("Failed to decompress gzip: {}", e)))?;
 
         // Extract tar archive
         let mut archive = Archive::new(decompressed.as_slice());
 
         // Create temporary directory for extraction
-        let temp_dir = self.cache_dir.join(format!(".tmp-{}-{}", crate_name, version));
+        let temp_dir = self
+            .cache_dir
+            .join(format!(".tmp-{}-{}", crate_name, version));
         std::fs::create_dir_all(&temp_dir)?;
 
         // Extract to temporary directory first
@@ -294,11 +294,7 @@ impl CrateDownloader {
     ///
     /// * `crate_name` - Name of the crate
     /// * `version` - Version of the crate
-    pub fn remove_extracted(
-        &self,
-        crate_name: &str,
-        version: &str,
-    ) -> Result<(), DownloadError> {
+    pub fn remove_extracted(&self, crate_name: &str, version: &str) -> Result<(), DownloadError> {
         let extraction_dir = self.get_extraction_dir(crate_name, version);
 
         if extraction_dir.exists() {
@@ -344,10 +340,7 @@ mod tests {
             CrateDownloader::new(temp_dir.path()).expect("Failed to create downloader");
 
         let url = downloader.get_download_url("serde", "1.0.0");
-        assert_eq!(
-            url,
-            "https://crates.io/api/v1/crates/serde/1.0.0/download"
-        );
+        assert_eq!(url, "https://crates.io/api/v1/crates/serde/1.0.0/download");
     }
 
     #[test]
@@ -367,8 +360,7 @@ mod tests {
 
         assert!(!cache_path.exists());
 
-        let downloader =
-            CrateDownloader::new(&cache_path).expect("Failed to create downloader");
+        let downloader = CrateDownloader::new(&cache_path).expect("Failed to create downloader");
 
         assert!(cache_path.exists());
         assert_eq!(downloader.cache_dir(), cache_path);

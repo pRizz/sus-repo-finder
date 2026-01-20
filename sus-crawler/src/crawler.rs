@@ -191,20 +191,18 @@ impl Crawler {
         let version = metadata.max_version.clone();
 
         // Step 2: Download and extract the latest version
-        let (has_build_rs, is_proc_macro) = match downloader
-            .download_and_extract(&name, &version)
-            .await
-        {
-            Ok(extracted) => (extracted.has_build_rs, extracted.is_proc_macro),
-            Err(e) => {
-                warn!(
-                    "Failed to download {}@{}: {} - storing with defaults",
-                    name, version, e
-                );
-                // Continue with defaults if download fails
-                (false, false)
-            }
-        };
+        let (has_build_rs, is_proc_macro) =
+            match downloader.download_and_extract(&name, &version).await {
+                Ok(extracted) => (extracted.has_build_rs, extracted.is_proc_macro),
+                Err(e) => {
+                    warn!(
+                        "Failed to download {}@{}: {} - storing with defaults",
+                        name, version, e
+                    );
+                    // Continue with defaults if download fails
+                    (false, false)
+                }
+            };
 
         // Step 3: Store crate in database
         let crate_id = match db

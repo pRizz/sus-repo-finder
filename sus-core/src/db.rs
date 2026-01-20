@@ -225,11 +225,10 @@ impl Database {
     ) -> Result<i64, sqlx::Error> {
         // Use INSERT OR REPLACE to handle upserts
         // First check if the crate exists
-        let existing: Option<(i64,)> =
-            sqlx::query_as("SELECT id FROM crates WHERE name = ?")
-                .bind(name)
-                .fetch_optional(&self.pool)
-                .await?;
+        let existing: Option<(i64,)> = sqlx::query_as("SELECT id FROM crates WHERE name = ?")
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await?;
 
         let crate_id = if let Some((id,)) = existing {
             // Update existing crate
@@ -288,13 +287,12 @@ impl Database {
         is_proc_macro: bool,
     ) -> Result<i64, sqlx::Error> {
         // Check if the version exists
-        let existing: Option<(i64,)> = sqlx::query_as(
-            "SELECT id FROM versions WHERE crate_id = ? AND version_number = ?",
-        )
-        .bind(crate_id)
-        .bind(version_number)
-        .fetch_optional(&self.pool)
-        .await?;
+        let existing: Option<(i64,)> =
+            sqlx::query_as("SELECT id FROM versions WHERE crate_id = ? AND version_number = ?")
+                .bind(crate_id)
+                .bind(version_number)
+                .fetch_optional(&self.pool)
+                .await?;
 
         let version_id = if let Some((id,)) = existing {
             // Update existing version
@@ -523,9 +521,7 @@ impl Database {
         let versions = self.get_versions_for_crate(crate_id).await?;
 
         // Find the position of the current version
-        let current_pos = versions
-            .iter()
-            .position(|v| v.id == current_version_id);
+        let current_pos = versions.iter().position(|v| v.id == current_version_id);
 
         // Get current version's findings
         let current_findings = self.get_findings_by_version(current_version_id).await?;
@@ -571,14 +567,15 @@ impl Database {
         };
 
         // Create a key function to identify similar findings (issue_type + file_path + code_snippet)
-        let make_key = |issue_type: &str, file_path: &str, code_snippet: &Option<String>| -> String {
-            format!(
-                "{}:{}:{}",
-                issue_type,
-                file_path,
-                code_snippet.as_deref().unwrap_or("")
-            )
-        };
+        let make_key =
+            |issue_type: &str, file_path: &str, code_snippet: &Option<String>| -> String {
+                format!(
+                    "{}:{}:{}",
+                    issue_type,
+                    file_path,
+                    code_snippet.as_deref().unwrap_or("")
+                )
+            };
 
         // Create a set of previous finding keys
         let previous_keys: std::collections::HashSet<String> = previous_findings
@@ -758,12 +755,13 @@ mod tests {
             .is_initialized()
             .await
             .expect("Failed to check initialization");
-        assert!(initialized, "Database should be initialized before reversal");
+        assert!(
+            initialized,
+            "Database should be initialized before reversal"
+        );
 
         // Reverse the schema
-        db.reverse_schema()
-            .await
-            .expect("Failed to reverse schema");
+        db.reverse_schema().await.expect("Failed to reverse schema");
 
         // Verify tables no longer exist
         let initialized_after = db
@@ -844,20 +842,19 @@ mod tests {
             .expect("Failed to create and initialize database");
 
         // Verify some indexes exist before reversal
-        let index_result: Option<(i32,)> =
-            sqlx::query_as("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_crates_name'")
-                .fetch_optional(db.pool())
-                .await
-                .expect("Failed to query index existence");
+        let index_result: Option<(i32,)> = sqlx::query_as(
+            "SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_crates_name'",
+        )
+        .fetch_optional(db.pool())
+        .await
+        .expect("Failed to query index existence");
         assert!(
             index_result.is_some(),
             "Index 'idx_crates_name' should exist before reversal"
         );
 
         // Reverse the schema
-        db.reverse_schema()
-            .await
-            .expect("Failed to reverse schema");
+        db.reverse_schema().await.expect("Failed to reverse schema");
 
         // Verify indexes are gone
         let expected_indexes = [
