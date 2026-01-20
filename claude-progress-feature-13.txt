@@ -1,0 +1,76 @@
+## Session: 2026-01-20 (Agent - Feature #13)
+
+### Feature #13: Pattern detector identifies shell commands
+**Status: IMPLEMENTATION COMPLETE - NEEDS BUILD VERIFICATION**
+
+#### What was done:
+1. Implemented ShellCommandVisitor struct for AST-based shell command detection:
+   - Created visitor that walks the AST using syn's Visit trait
+   - Detects use statements importing std::process or Command
+   - Detects Command::new() calls, especially with shell names
+   - Detects method chains like .arg(), .args(), .spawn(), .output()
+   - Extracts code context (3 lines before/after)
+
+2. Added shell command detection patterns (SHELL_COMMAND_PATTERNS):
+   - Standard library: std::process, Command
+   - Shell names: bash, sh, cmd, powershell, pwsh, zsh, fish
+   - Absolute paths: /bin/sh, /bin/bash, /usr/bin/env
+
+3. Added suspicious shell arguments (SUSPICIOUS_SHELL_ARGS):
+   - "-c" (execute command string)
+   - "/C" (Windows cmd.exe)
+   - "-e" (execute expression)
+   - "eval", "exec"
+
+4. Implemented detect_shell_commands method:
+   - Uses ShellCommandVisitor to walk AST
+   - Returns findings with IssueType::ShellCommand
+   - Severity is Medium (as per spec)
+
+5. Added 9 comprehensive unit tests:
+   - test_detect_command_new_bash - Primary test case
+   - test_shell_commands_have_medium_severity - Verifies Medium severity
+   - test_detect_process_command_import - Tests std::process import
+   - test_detect_various_shells - Tests sh, cmd, powershell
+   - test_detect_suspicious_shell_args - Tests -c argument detection
+   - test_detect_absolute_path_shell - Tests /bin/sh detection
+   - test_detect_non_shell_command - Tests non-shell commands like cargo
+   - test_shell_command_context_extraction - Verifies context capture
+   - test_detect_usr_bin_env - Tests /usr/bin/env detection
+
+#### Files modified:
+- sus-detector/src/detector.rs:
+  - Added SHELL_COMMAND_PATTERNS constant
+  - Added SUSPICIOUS_SHELL_ARGS constant
+  - Implemented ShellCommandVisitor struct
+  - Implemented detect_shell_commands method
+  - Added 9 unit tests
+
+#### Commits:
+- 42d6d3c: Implement Feature #13: Pattern detector identifies shell commands
+
+#### Verification needed:
+The implementation is complete but cargo build/test is restricted in this environment.
+To verify:
+1. Run: cargo build --all-targets
+2. Run: cargo test -p sus-detector test_detect_command_new_bash
+3. Restart servers to pick up new code
+4. Test via API: POST /api/crawler/test-detector with shell command code
+
+#### Expected API test:
+```json
+POST /api/crawler/test-detector
+{
+  "source": "use std::process::Command;\n\nfn main() {\n    Command::new(\"bash\").arg(\"-c\").spawn();\n}",
+  "file_path": "build.rs"
+}
+```
+
+Expected response should include findings with:
+- issue_type: "shell_command"
+- severity: "medium"
+- summary containing "bash" or "Command"
+
+#### Current Completion Status:
+- Features passing: 20/170 (11.8%)
+- Feature #13 (Pattern detector identifies shell commands) - IMPLEMENTATION COMPLETE
