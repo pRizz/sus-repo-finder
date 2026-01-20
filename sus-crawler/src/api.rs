@@ -15,6 +15,7 @@ use sus_core::Database;
 
 use crate::templates::StatusTemplate;
 use sus_crawler::{CrateDownloader, Crawler, CrawlerConfig, CratesIoClient};
+use sus_detector::Detector;
 
 /// Wrapper for rendering Askama templates as HTML responses
 pub struct HtmlTemplate<T>(pub T);
@@ -72,17 +73,21 @@ pub fn create_router(db: Database) -> Router {
         .route("/api/crawler/pause", axum::routing::post(pause))
         .route("/api/crawler/resume", axum::routing::post(resume))
         // Test endpoint to fetch crate metadata from crates.io
-        .route("/api/crawler/test-crate/{name}", get(test_crate))
+        .route("/api/crawler/test-crate/:name", get(test_crate))
         // Test endpoint to download and extract a crate
-        .route("/api/crawler/test-download/{name}/{version}", get(test_download))
+        .route("/api/crawler/test-download/:name/:version", get(test_download))
         // Crawl and store endpoint: fetches from crates.io and stores in database
-        .route("/api/crawler/crawl-and-store/{name}", axum::routing::post(crawl_and_store))
+        .route("/api/crawler/crawl-and-store/:name", axum::routing::post(crawl_and_store))
         // Get stored crate endpoint: retrieves a crate from the database
-        .route("/api/crawler/stored-crate/{name}", get(get_stored_crate))
+        .route("/api/crawler/stored-crate/:name", get(get_stored_crate))
         // Store an analysis result (finding) in the database
         .route("/api/crawler/store-finding", axum::routing::post(store_finding))
         // Get all findings for a specific crate version
-        .route("/api/crawler/findings/{crate_name}/{version}", get(get_findings))
+        .route("/api/crawler/findings/:crate_name/:version", get(get_findings))
+        // Analyze a crate's build.rs file for suspicious patterns
+        .route("/api/crawler/analyze/:name/:version", get(analyze_crate))
+        // Test the detector on inline code
+        .route("/api/crawler/test-detector", axum::routing::post(test_detector))
         .with_state(state)
 }
 
@@ -662,5 +667,160 @@ async fn process_parallel(
         "successful": successful,
         "failed": failed,
         "results": result_json
+    }))
+}
+
+/// Analyze a crate's build.rs file for suspicious patterns
+/// GET /api/crawler/analyze/{name}/{version}
+///
+/// This endpoint downloads a crate, extracts it, and runs the pattern detector
+/// on its build.rs file (if present). Returns all detected findings.
+///
+/// Returns:
+/// - success: true if analysis completed
+/// - crate_name: name of the analyzed crate
+/// - version: version that was analyzed
+/// - has_build_rs: whether the crate has a build.rs file
+/// - findings: array of detected suspicious patterns
+async fn analyze_crate(
+    Path((name, version)): Path<(String, String)>,
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> impl IntoResponse {
+    // Step 1: Download and extract the crate
+    let extracted = match state.crate_downloader.download_and_extract(&name, &version).await {
+        Ok(extracted) => extracted,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": format!("Failed to download crate: {}", e)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Step 2: Check if build.rs exists
+    if !extracted.has_build_rs {
+        return Json(json!({
+            "success": true,
+            "crate_name": name,
+            "version": version,
+            "has_build_rs": false,
+            "findings": [],
+            "message": "No build.rs file found in this crate"
+        }))
+        .into_response();
+    }
+
+    // Step 3: Read the build.rs file
+    let build_rs_path = extracted
+        .build_rs_path
+        .expect("has_build_rs is true but no path");
+    let source = match std::fs::read_to_string(&build_rs_path) {
+        Ok(content) => content,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": format!("Failed to read build.rs: {}", e)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Step 4: Run the detector
+    let detector = Detector::new();
+    let findings = detector.analyze(&source, "build.rs");
+
+    // Step 5: Convert findings to JSON
+    let findings_json: Vec<serde_json::Value> = findings
+        .iter()
+        .map(|f| {
+            json!({
+                "issue_type": f.issue_type.to_string(),
+                "severity": f.severity.to_string(),
+                "file_path": f.file_path,
+                "line_start": f.line_start,
+                "line_end": f.line_end,
+                "code_snippet": f.code_snippet,
+                "context_before": f.context_before,
+                "context_after": f.context_after,
+                "summary": f.summary,
+                "details": f.details
+            })
+        })
+        .collect();
+
+    Json(json!({
+        "success": true,
+        "crate_name": name,
+        "version": version,
+        "has_build_rs": true,
+        "findings_count": findings.len(),
+        "findings": findings_json
+    }))
+    .into_response()
+}
+
+/// Request body for testing the detector on inline code
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestDetectorRequest {
+    /// The Rust source code to analyze
+    pub source: String,
+    /// Optional file path (defaults to "test.rs")
+    pub file_path: Option<String>,
+}
+
+/// Test the pattern detector on inline code
+/// POST /api/crawler/test-detector
+///
+/// This endpoint allows testing the pattern detector on arbitrary Rust code
+/// without downloading a crate. Useful for development and testing.
+///
+/// Request body (JSON):
+/// - source: The Rust source code to analyze
+/// - file_path: Optional file path (defaults to "test.rs")
+///
+/// Returns:
+/// - success: true if analysis completed
+/// - findings_count: number of findings detected
+/// - findings: array of detected suspicious patterns
+async fn test_detector(
+    axum::extract::Json(request): axum::extract::Json<TestDetectorRequest>,
+) -> impl IntoResponse {
+    let file_path = request.file_path.unwrap_or_else(|| "test.rs".to_string());
+
+    let detector = Detector::new();
+    let findings = detector.analyze(&request.source, &file_path);
+
+    // Convert findings to JSON
+    let findings_json: Vec<serde_json::Value> = findings
+        .iter()
+        .map(|f| {
+            json!({
+                "issue_type": f.issue_type.to_string(),
+                "severity": f.severity.to_string(),
+                "file_path": f.file_path,
+                "line_start": f.line_start,
+                "line_end": f.line_end,
+                "code_snippet": f.code_snippet,
+                "context_before": f.context_before,
+                "context_after": f.context_after,
+                "summary": f.summary,
+                "details": f.details
+            })
+        })
+        .collect();
+
+    Json(json!({
+        "success": true,
+        "file_path": file_path,
+        "source_length": request.source.len(),
+        "findings_count": findings.len(),
+        "findings": findings_json
     }))
 }

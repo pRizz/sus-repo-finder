@@ -776,3 +776,112 @@
 #### Current Completion Status:
 - Features passing: 16/170 (9.4%)
 - Feature #10 (Git repository initialized) - PASSING
+[Testing] 2026-01-19 18:25:34 - Regression test for Feature #5 (Crawler server starts on configured port)
+  - Verified server process running: sus-crawl (PID 13063) bound to port 3001
+  - HTTP 200 response confirmed from http://localhost:3001/
+  - Browser automation verified page loads correctly:
+    - Page title: 'Status - Crawler Portal'
+    - Navigation bar with Status, Detailed, Errors links
+    - Crawler Status heading displayed
+    - Stats cards (Crates Scanned, Total Findings, Errors, Queue Size)
+    - Start Crawler button present
+    - Current Progress section displayed
+  - Screenshot saved: .playwright-mcp/regression-feature-5-crawler-server-2.png
+  - Only console error: favicon.ico 404 (cosmetic, not functional)
+  - All 4 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #5 (Crawler server starts on configured port) still passing
+[Testing] 2026-01-19 18:25:50 - Regression test for Feature #1 (Cargo workspace initializes without errors)
+  - Verified workspace structure: 4 member crates (sus-core, sus-detector, sus-crawler, sus-dashboard)
+  - Cargo.toml properly configured with resolver='2' and workspace dependencies
+  - Compiled binaries exist in target/debug/:
+    - sus-crawler: 27MB executable
+    - sus-dashboard: 19MB executable
+    - All library .rlib files present
+  - Cargo.lock present (76KB) - dependencies resolved
+  - Both servers running and responding:
+    - Crawler portal: http://localhost:3001 - HTTP 200, UI functional
+    - Dashboard: http://localhost:3002 - HTTP 200, UI functional
+  - Screenshots saved:
+    - .playwright-mcp/regression-feature-1-crawler-portal.png
+    - .playwright-mcp/regression-feature-1-dashboard.png
+  - All 3 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #1 (Cargo workspace initializes without errors) still passing
+[Testing] 2026-01-19 18:29:39 - Regression test for Feature #6 (Dark theme applied by default)
+  - Dashboard verified at http://localhost:3002:
+    - Body background: rgb(13, 17, 23) = #0d1117 ✓
+    - Body text: rgb(229, 231, 235) (light) ✓
+    - Nav background: rgb(22, 27, 34) = #161b22 ✓
+    - Headings: white ✓
+  - Crawler portal verified at http://localhost:3001:
+    - Same dark theme colors applied ✓
+    - Body background: #0d1117 ✓
+    - Nav background: #161b22 ✓
+  - Screenshots saved:
+    - .playwright-mcp/regression-feature-6-dashboard.png
+    - .playwright-mcp/regression-feature-6-crawler.png
+  - Only console error: favicon.ico 404 (cosmetic, not functional)
+  - All 5 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #6 (Dark theme applied by default) still passing
+
+## Session: 2026-01-19 (Agent - Feature #11)
+
+### Feature #11: Pattern detector identifies network calls
+**Status: IN PROGRESS (Implementation Complete, Needs Rebuild)**
+
+#### What was done:
+1. Implemented `detect_network_calls` method in `sus-detector/src/detector.rs`:
+   - Created `NetworkCallVisitor` struct that walks the AST using syn's visitor pattern
+   - Detects network-related imports: reqwest, hyper, ureq, std::net, curl, tokio::net, etc.
+   - Detects network function calls and method calls
+   - Detects network type references
+   - Extracts code context (3 lines before/after)
+   - Returns findings with Medium severity (as per spec)
+
+2. Added API endpoints to `sus-crawler/src/api.rs`:
+   - `GET /api/crawler/analyze/{name}/{version}` - Analyzes a crate's build.rs file
+   - `POST /api/crawler/test-detector` - Tests detector on inline code
+
+3. Added comprehensive unit tests to `sus-detector/src/detector.rs`:
+   - `test_detect_reqwest_import` - Tests reqwest detection
+   - `test_detect_hyper_import` - Tests hyper detection  
+   - `test_detect_std_net_import` - Tests std::net detection
+   - `test_detect_curl_import` - Tests curl detection
+   - `test_network_calls_have_medium_severity` - Verifies Medium severity
+   - `test_context_extraction` - Verifies context is extracted
+   - `test_detect_tokio_net` - Tests async networking detection
+
+#### Network patterns detected:
+- HTTP clients: reqwest, hyper, ureq, attohttpc, isahc, surf
+- Standard library: std::net, TcpStream, TcpListener, UdpSocket
+- Low-level: curl, curl_sys, socket2, mio
+- Async runtime: tokio::net, async_std::net
+
+#### Files created/modified:
+- `sus-detector/src/detector.rs` - Implemented NetworkCallVisitor and tests
+- `sus-crawler/src/api.rs` - Added analyze and test-detector endpoints
+
+#### Verification steps (Feature #11):
+1. Create test build.rs with Command::new('bash') - PENDING (needs rebuild)
+2. Run detector on test file - PENDING (needs rebuild)
+3. Verify network pattern detected - PENDING (needs rebuild)
+4. Verify Medium severity assigned - IMPLEMENTED in code
+
+#### Why needs rebuild:
+The implementation is complete but the server binaries need to be rebuilt with `cargo build`
+to make the changes take effect. The current running servers use older binaries.
+
+#### Next steps:
+1. Run `cargo build --all-targets` to compile the changes
+2. Restart servers (kill existing processes, run run-crawler.sh and run-dashboard.sh)
+3. Test via API endpoint:
+   - POST /api/crawler/test-detector with reqwest code
+   - Verify findings array contains network detection
+   - Verify severity is "medium"
+4. Run unit tests: `cargo test -p sus-detector`
+
+#### Current Completion Status:
+- Features passing: 17/170 (10.0%)
+- Feature #11 (Pattern detector identifies network calls) - IN PROGRESS
