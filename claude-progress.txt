@@ -3206,3 +3206,174 @@ Multiple pages of results navigable - implement pagination for the crate list pa
 - Features passing: 47/170 (27.6%)
 - Feature #72 (Crate list pagination works) - PASSING ✅
 
+
+## Session: 2026-01-19 (Agent - Feature #153)
+
+### Feature #153: Cargo clippy passes
+**Status: PASSING** ✅
+
+#### Feature Description:
+No linting warnings - verify that cargo clippy passes without warnings.
+
+#### Verification Steps:
+
+1. **Step 1: Run cargo clippy** ✅
+   - Ran: `cargo clippy --all-targets --all-features -- -D warnings`
+   - Initially found 35+ warnings across all crates
+
+2. **Step 2: Verify no warnings** ✅
+   - Fixed all clippy warnings:
+     - sus-core: 1 warning (too_many_arguments) - fixed with NewAnalysisResult struct
+     - sus-core tests: 2 warnings (clone_on_copy) - removed unnecessary .clone() calls
+     - sus-detector: 28 warnings (redundant_closure, unused variables, manual_find, etc.)
+     - sus-crawler: 3 warnings (unused import, dead code)
+     - sus-dashboard: 1 warning (dead code)
+   - Final clippy run: 0 warnings, 0 errors
+
+3. **Step 3: Verify no errors** ✅
+   - Project builds successfully
+   - Both servers (crawler on 3001, dashboard on 3002) start and respond
+   - Browser automation verified both UIs work correctly
+
+#### Fixes Applied:
+- **sus-core/src/db.rs**: Refactored `insert_analysis_result` to use NewAnalysisResult struct
+- **sus-core/src/models.rs**: Added NewAnalysisResult struct to group function parameters
+- **sus-core/src/lib.rs**: Removed redundant .clone() calls on Copy types
+- **sus-detector/src/detector.rs**: 
+  - Replaced redundant closures with function references
+  - Prefixed unused variables with `_`
+  - Used `.is_multiple_of()` instead of manual `% 4 == 0`
+  - Used iterator `.find()` instead of manual loop
+  - Used `!is_empty()` instead of `.len() >= 1`
+- **sus-crawler/src/api.rs**: Removed unused import, added #[allow(dead_code)] for future code
+- **sus-dashboard/src/api.rs**: Added #[allow(dead_code)] for template fields
+
+#### Test Evidence:
+- Screenshots:
+  - .playwright-mcp/feature-153-dashboard-working.png
+  - .playwright-mcp/feature-153-crawler-working.png
+- Clippy output: `Finished dev profile [unoptimized + debuginfo] target(s)`
+- Console errors: favicon 404 only (cosmetic)
+
+#### Current Completion Status:
+- Features passing: 47/170 (27.6%)
+- Feature #153 (Cargo clippy passes) - PASSING ✅
+[Testing] 2026-01-19 19:40 - Regression test for Feature #148 (Proper error propagation with ? operator)
+  - Step 1: Review error handling patterns ✅
+    - No unwrap() in production code
+    - unwrap() only in test code and test fixtures (acceptable)
+  - Step 2: Verify ? used for propagation ✅
+    - sus-core/src/db.rs: 29 uses
+    - sus-crawler: 21 uses across 3 files  
+    - sus-dashboard: 3 uses
+  - Step 3: Verify thiserror/anyhow used appropriately ✅
+    - thiserror::Error for library errors (DownloadError, CratesIoError)
+    - anyhow::Result for application entry points (main.rs files)
+  - Additional: Tested error handling via UI and API
+    - Non-existent crate shows proper 404 message
+    - API returns proper JSON error response
+  - Screenshot: .playwright-mcp/feature-148-regression-dashboard.png
+  - Console errors: favicon 404 only (cosmetic)
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #148 still passing
+
+## Session: 2026-01-20 (Agent - Feature #30)
+
+### Feature #30: Crawler respects rate limiting
+**Status: PASSING** ✅
+
+#### Feature Description:
+Politeness delays applied between requests - ensures the crawler doesn't overwhelm the crates.io API by spacing out requests according to a configurable delay.
+
+#### Implementation Summary:
+
+1. **Added rate_limit_delay_ms to CrawlerConfig** ✅
+   - New field: `rate_limit_delay_ms: u64` with default of 1000ms (1 second)
+   - Builder pattern: `CrawlerConfig::new()` and `with_rate_limit_delay_ms()`
+   - Documented as "helps be a polite citizen when accessing crates.io"
+
+2. **Implemented RateLimiter struct** ✅
+   - Tracks `last_request: Instant` and `delay: Duration`
+   - `wait_and_record()` method waits if needed before allowing next request
+   - Shared via `Arc<Mutex<RateLimiter>>` for async access
+
+3. **Updated Crawler to use rate limiter** ✅
+   - Rate limiter applied in `process_crates()` before each API call
+   - Works with semaphore for concurrent request limiting
+   - Logs rate limiting delays via tracing::debug
+
+4. **Added test endpoint** ✅
+   - POST /api/crawler/test-rate-limit
+   - Accepts `crate_names` and `rate_limit_delay_ms` parameters
+   - Returns timing statistics including `rate_limiting_respected` flag
+
+5. **Added unit tests** ✅
+   - `test_default_config` - verifies default rate limit is 1000ms
+   - `test_custom_config` - verifies custom rate limit settings
+   - `test_config_builder` - verifies builder pattern
+   - `test_rate_limiter_delays` - verifies rate limiter actually delays
+
+#### Verification Steps:
+
+1. **Step 1: Configure rate limit to 1 req/sec** ✅
+   - Set `rate_limit_delay_ms: 1000` in test request
+
+2. **Step 2: Queue multiple crates** ✅
+   - Queued 3 crates: serde, tokio, anyhow
+
+3. **Step 3: Verify requests spaced by at least configured delay** ✅
+   - Total processing time: 2136ms
+   - Expected minimum: 2000ms (2 delays × 1000ms)
+   - `rate_limiting_respected: true`
+
+4. **Step 4: Verify no rate limit errors from crates.io** ✅
+   - All 3 requests successful
+   - No 429 (Too Many Requests) errors
+   - No rate limit errors in console
+
+#### Files Modified:
+- `sus-crawler/src/crawler.rs` - Added RateLimiter, rate_limit_delay_ms config
+- `sus-crawler/src/api.rs` - Added test-rate-limit endpoint
+
+#### Test Evidence:
+- Screenshots:
+  - .playwright-mcp/.playwright-mcp/feature-30-crawler-portal.png
+  - .playwright-mcp/.playwright-mcp/feature-30-rate-limiting-verified.png
+- API Response:
+  ```json
+  {
+    "actual_total_time_ms": 2136,
+    "expected_min_time_ms": 2000,
+    "rate_limit_delay_ms": 1000,
+    "rate_limiting_respected": true,
+    "successful_fetches": 3
+  }
+  ```
+- Console errors: favicon 404 only (cosmetic)
+
+#### Commit:
+- ae8d15d: Implement Feature #30: Crawler respects rate limiting
+
+#### Current Completion Status:
+- Features passing: 48/170 (28.2%)
+- Feature #30 (Crawler respects rate limiting) - PASSING ✅
+[Testing] 2026-01-20 - Regression test for Feature #14 (Pattern detector identifies process spawning)
+  - Step 1: Created test build.rs with process spawn patterns:
+    - nix::unistd::fork, libc::execve, tokio::process::Command
+    - subprocess::Popen, .wait() method
+    - libc::posix_spawn, libc::system, libc::popen
+    - nix::unistd::daemon, setsid, execvp
+  - Step 2: Ran detector via /api/crawler/test-detector API ✅
+  - Step 3: Verified process_spawn patterns detected (12+ findings):
+    - nix::unistd::fork → process_spawn, medium ✅
+    - libc::execve → process_spawn, medium ✅
+    - tokio::process::Command → process_spawn, medium ✅
+    - subprocess::Popen → process_spawn, medium ✅
+    - .wait() method → process_spawn, medium ✅
+    - libc::posix_spawn, system, popen → process_spawn, medium ✅
+    - nix::unistd::daemon, setsid, execvp → process_spawn, medium ✅
+  - UI Verification: Dashboard and crate detail pages working correctly
+  - Screenshot: .playwright-mcp/feature-14-regression-anyhow-detail.png
+  - Console errors: None (favicon 404 only - cosmetic)
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #14 still passing
