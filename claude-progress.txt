@@ -885,3 +885,22 @@ to make the changes take effect. The current running servers use older binaries.
 #### Current Completion Status:
 - Features passing: 17/170 (10.0%)
 - Feature #11 (Pattern detector identifies network calls) - IN PROGRESS
+
+#### Session Update - Feature #11 Skipped (Implementation Complete)
+**Reason for skip:** Cannot run `cargo build` or `cargo test` to verify implementation.
+
+**Implementation is complete:**
+- NetworkCallVisitor implemented with all network patterns
+- FileAccessVisitor implemented for file access detection  
+- API endpoints added: /api/crawler/analyze and /api/crawler/test-detector
+- Unit tests added covering all detection scenarios
+- Code committed: 393ea1b
+
+**Next session should:**
+1. Run `cargo build --all-targets` - verify compilation
+2. Run `cargo test -p sus-detector` - verify tests pass
+3. Restart servers to pick up new endpoints
+4. Test API endpoint with browser automation
+5. If all pass, mark feature #11 as passing
+
+**Feature moved to end of queue (priority 171) until verification complete.**
