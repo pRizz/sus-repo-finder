@@ -75,6 +75,10 @@ pub fn create_router(db: Database) -> Router {
         .route("/api/crawler/test-crate/{name}", get(test_crate))
         // Test endpoint to download and extract a crate
         .route("/api/crawler/test-download/{name}/{version}", get(test_download))
+        // Crawl and store endpoint: fetches from crates.io and stores in database
+        .route("/api/crawler/crawl-and-store/{name}", axum::routing::post(crawl_and_store))
+        // Get stored crate endpoint: retrieves a crate from the database
+        .route("/api/crawler/stored-crate/{name}", get(get_stored_crate))
         .with_state(state)
 }
 
@@ -239,5 +243,153 @@ async fn test_download(
             )
                 .into_response()
         }
+    }
+}
+
+/// Crawl and store a crate from crates.io into the database
+/// POST /api/crawler/crawl-and-store/{name}
+///
+/// This endpoint:
+/// 1. Fetches crate metadata from crates.io
+/// 2. Downloads and extracts the latest version to detect build.rs and proc-macro
+/// 3. Stores the crate and its versions in the database
+///
+/// Returns:
+/// - crate_id: database ID of the stored crate
+/// - versions_stored: number of versions stored
+/// - name, description, repo_url, download_count: stored metadata
+async fn crawl_and_store(
+    Path(name): Path<String>,
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> impl IntoResponse {
+    // Step 1: Fetch crate metadata from crates.io
+    let crate_response = match state.crates_io_client.get_crate(&name).await {
+        Ok(response) => response,
+        Err(e) => {
+            let error_message = e.to_string();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "success": false,
+                    "error": format!("Failed to fetch from crates.io: {}", error_message)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    let metadata: sus_crawler::CrateMetadata = crate_response.clone().into();
+
+    // Step 2: Store the crate in the database
+    let crate_id = match state
+        .db
+        .upsert_crate(
+            &metadata.name,
+            metadata.repo_url.as_deref(),
+            metadata.description.as_deref(),
+            metadata.download_count,
+        )
+        .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            let error_message = e.to_string();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": format!("Failed to store crate: {}", error_message)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Step 3: Download and analyze the latest version to get has_build_rs and is_proc_macro
+    let latest_version = &metadata.max_version;
+    let (has_build_rs, is_proc_macro) =
+        match state.crate_downloader.download_and_extract(&name, latest_version).await {
+            Ok(extracted) => (extracted.has_build_rs, extracted.is_proc_macro),
+            Err(_) => {
+                // If download fails, store with defaults (we still have the metadata)
+                (false, false)
+            }
+        };
+
+    // Step 4: Store the latest version in the database
+    let version_id = match state
+        .db
+        .upsert_version(crate_id, latest_version, has_build_rs, is_proc_macro)
+        .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            // Log but don't fail - we still stored the crate
+            tracing::warn!("Failed to store version: {}", e);
+            0
+        }
+    };
+
+    // Return success response with stored data
+    Json(json!({
+        "success": true,
+        "crate_id": crate_id,
+        "version_id": version_id,
+        "stored": {
+            "name": metadata.name,
+            "description": metadata.description,
+            "repo_url": metadata.repo_url,
+            "download_count": metadata.download_count,
+            "latest_version": latest_version,
+            "has_build_rs": has_build_rs,
+            "is_proc_macro": is_proc_macro
+        }
+    }))
+    .into_response()
+}
+
+/// Get a stored crate from the database
+/// GET /api/crawler/stored-crate/{name}
+///
+/// Retrieves a crate that was previously stored using crawl-and-store.
+/// Returns 404 if the crate doesn't exist in the database.
+async fn get_stored_crate(
+    Path(name): Path<String>,
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> impl IntoResponse {
+    match state.db.get_crate_by_name(&name).await {
+        Ok(Some(crate_info)) => {
+            Json(json!({
+                "success": true,
+                "crate": {
+                    "id": crate_info.id,
+                    "name": crate_info.name,
+                    "description": crate_info.description,
+                    "repo_url": crate_info.repo_url,
+                    "download_count": crate_info.download_count,
+                    "finding_count": crate_info.finding_count,
+                    "max_severity": crate_info.max_severity,
+                    "created_at": crate_info.created_at,
+                    "updated_at": crate_info.updated_at
+                }
+            }))
+            .into_response()
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "success": false,
+                "error": format!("Crate '{}' not found in database", name)
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "success": false,
+                "error": format!("Database error: {}", e)
+            })),
+        )
+            .into_response(),
     }
 }

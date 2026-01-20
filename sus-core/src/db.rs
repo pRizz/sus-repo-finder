@@ -179,6 +179,170 @@ impl Database {
 
         Ok(findings)
     }
+
+    /// Insert or update a crate in the database
+    ///
+    /// If the crate already exists (by name), updates its metadata.
+    /// Returns the crate ID.
+    #[instrument(skip(self))]
+    pub async fn upsert_crate(
+        &self,
+        name: &str,
+        repo_url: Option<&str>,
+        description: Option<&str>,
+        download_count: i64,
+    ) -> Result<i64, sqlx::Error> {
+        // Use INSERT OR REPLACE to handle upserts
+        // First check if the crate exists
+        let existing: Option<(i64,)> =
+            sqlx::query_as("SELECT id FROM crates WHERE name = ?")
+                .bind(name)
+                .fetch_optional(&self.pool)
+                .await?;
+
+        let crate_id = if let Some((id,)) = existing {
+            // Update existing crate
+            sqlx::query(
+                r#"
+                UPDATE crates
+                SET repo_url = ?,
+                    description = ?,
+                    download_count = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                "#,
+            )
+            .bind(repo_url)
+            .bind(description)
+            .bind(download_count)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+            info!("Updated crate '{}' (id: {})", name, id);
+            id
+        } else {
+            // Insert new crate
+            let result = sqlx::query(
+                r#"
+                INSERT INTO crates (name, repo_url, description, download_count)
+                VALUES (?, ?, ?, ?)
+                "#,
+            )
+            .bind(name)
+            .bind(repo_url)
+            .bind(description)
+            .bind(download_count)
+            .execute(&self.pool)
+            .await?;
+
+            let id = result.last_insert_rowid();
+            info!("Inserted new crate '{}' (id: {})", name, id);
+            id
+        };
+
+        Ok(crate_id)
+    }
+
+    /// Insert or update a version for a crate
+    ///
+    /// If the version already exists, updates its metadata.
+    /// Returns the version ID.
+    #[instrument(skip(self))]
+    pub async fn upsert_version(
+        &self,
+        crate_id: i64,
+        version_number: &str,
+        has_build_rs: bool,
+        is_proc_macro: bool,
+    ) -> Result<i64, sqlx::Error> {
+        // Check if the version exists
+        let existing: Option<(i64,)> = sqlx::query_as(
+            "SELECT id FROM versions WHERE crate_id = ? AND version_number = ?",
+        )
+        .bind(crate_id)
+        .bind(version_number)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let version_id = if let Some((id,)) = existing {
+            // Update existing version
+            sqlx::query(
+                r#"
+                UPDATE versions
+                SET has_build_rs = ?,
+                    is_proc_macro = ?
+                WHERE id = ?
+                "#,
+            )
+            .bind(has_build_rs)
+            .bind(is_proc_macro)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+            info!(
+                "Updated version '{}' for crate_id {} (id: {})",
+                version_number, crate_id, id
+            );
+            id
+        } else {
+            // Insert new version
+            let result = sqlx::query(
+                r#"
+                INSERT INTO versions (crate_id, version_number, has_build_rs, is_proc_macro)
+                VALUES (?, ?, ?, ?)
+                "#,
+            )
+            .bind(crate_id)
+            .bind(version_number)
+            .bind(has_build_rs)
+            .bind(is_proc_macro)
+            .execute(&self.pool)
+            .await?;
+
+            let id = result.last_insert_rowid();
+            info!(
+                "Inserted new version '{}' for crate_id {} (id: {})",
+                version_number, crate_id, id
+            );
+            id
+        };
+
+        Ok(version_id)
+    }
+
+    /// Get a crate by name
+    pub async fn get_crate_by_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<crate::models::CrateWithStats>, sqlx::Error> {
+        let crate_info = sqlx::query_as::<_, crate::models::CrateWithStats>(
+            r#"
+            SELECT
+                c.id,
+                c.name,
+                c.repo_url,
+                c.description,
+                c.download_count,
+                c.created_at,
+                c.updated_at,
+                (SELECT COUNT(*) FROM analysis_results ar
+                 JOIN versions v ON ar.version_id = v.id
+                 WHERE v.crate_id = c.id) as finding_count,
+                (SELECT MAX(ar.severity) FROM analysis_results ar
+                 JOIN versions v ON ar.version_id = v.id
+                 WHERE v.crate_id = c.id) as max_severity
+            FROM crates c
+            WHERE c.name = ?
+            "#,
+        )
+        .bind(name)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(crate_info)
+    }
 }
 
 #[cfg(test)]
