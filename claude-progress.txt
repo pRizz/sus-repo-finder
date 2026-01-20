@@ -4877,3 +4877,64 @@ Content fits viewport - verify that at 375px mobile width, there is no horizonta
 #### Current Completion Status:
 - Features passing: 71/170 (41.8%)
 - Feature #110 (No horizontal scroll on mobile) - PASSING ✅
+
+## Session: 2026-01-20 (Agent - Feature #111)
+
+### Feature #111: Filter sidebar collapsible on mobile
+**Status: PASSING** ✅
+
+#### Feature Description:
+Filters accessible but not always visible - verify that on mobile devices, the filter sidebar can be toggled open/closed.
+
+#### Verification Steps:
+
+**Step 1: Load crate list on mobile** ✅
+- Set viewport to 375x667 (mobile)
+- Navigated to http://localhost:3010/crates
+- Page loaded successfully
+
+**Step 2: Verify filter toggle visible** ✅
+- "Filters" button with filter icon visible in header
+- Button has dropdown chevron indicator
+- Positioned next to heading "Scanned Crates"
+
+**Step 3: Toggle filters open** ✅
+- Clicked "Filters" button
+- Filter sidebar expanded below the header
+- All filters visible: Sort, Severity, Issue Type, Downloads
+- "Clear all" link available
+
+**Step 4: Verify filters shown** ✅
+- Sort: Last Updated dropdown
+- Severity: All/High/Medium/Low/No Findings dropdown
+- Issue Type: All Types/Network/File Access/Shell Command/etc. dropdown
+- Downloads: Any/1M+/100K+/10K+/1K+ dropdown
+- Clear all link to reset filters
+
+**Step 5: Toggle filters closed** ✅
+- Clicked "Filters" button again
+- Filter sidebar collapsed
+- Only "Filters" button visible again
+
+#### Desktop Verification:
+- At 1024px viewport, filters are always visible (no toggle needed)
+- "Filters" button is hidden on desktop (md:hidden class)
+- Sort by dropdown in header, filter bar always visible below
+
+#### Test Evidence:
+- Screenshots:
+  - feature-111-step1-mobile-filter-toggle.png - Initial mobile state
+  - feature-111-step3-filters-open.png - Filter panel expanded
+  - feature-111-step5-filters-closed.png - Filter panel collapsed
+  - feature-111-desktop-filters-visible.png - Desktop view with permanent filters
+- Console errors: Only favicon 404 (cosmetic)
+
+#### Commit:
+- 84a6801: Verify Feature #111: Filter sidebar collapsible on mobile
+
+#### Note:
+The collapsible filter sidebar functionality was already implemented as part of Feature #110 (No horizontal scroll on mobile). This session verified the functionality and marked the feature as passing.
+
+#### Current Completion Status:
+- Features passing: 70/170 (41.2%)
+- Feature #111 (Filter sidebar collapsible on mobile) - PASSING ✅
