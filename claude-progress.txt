@@ -5080,3 +5080,63 @@ Also verified on Crates list page:
 #### Current Completion Status:
 - Features passing: 73/170 (42.9%)
 - Feature #114 (Tab navigation works on interactive elements) - PASSING ✅
+
+
+## Session: 2026-01-20 (Agent - Feature #115)
+
+### Feature #115: Focus ring visible on focused elements
+**Status: PASSING** ✅
+
+#### Feature Description:
+Focused elements have visible indicator - verify that when tabbing through interactive elements, a visible focus ring appears.
+
+#### Verification Steps:
+
+**Step 1: Tab to a button** ✅
+- Loaded Dashboard at http://localhost:3002/
+- Used Tab key to navigate through all interactive elements
+- Tabbed through: Logo link → Dashboard link → Crates link → Search input → "Browse All Crates" button
+- Also tested Crawler Portal at http://localhost:3001/
+- Tabbed through: Crawler Portal link → Status → Detailed → Errors → "Start Crawler" button
+
+**Step 2: Verify focus ring visible** ✅
+- All elements show visible blue focus ring when focused via keyboard
+- Screenshots captured showing focus rings on:
+  - Links (logo, nav links, crate links)
+  - Search input
+  - Buttons ("Browse All Crates", "Start Crawler")
+
+**Step 3: Verify sufficient contrast** ✅
+- Focus ring color: Blue (#0060cc / rgb(0, 95, 204)) - browser default
+- Background: Dark (#0d1117)
+- Excellent contrast ratio between blue focus ring and dark background
+- Focus ring visible at 2px width with offset
+
+#### Implementation:
+Added CSS focus-visible styles to both dashboard and crawler templates:
+- `outline: 2px solid #58a6ff` (accent blue)
+- `outline-offset: 2px` for better visibility
+- Applied to: links, buttons, inputs, selects, textareas, [role="button"], [tabindex]
+- Uses `:focus-visible` to only show for keyboard navigation (not mouse clicks)
+
+#### Files Modified:
+- sus-dashboard/templates/base.html (+16 lines focus CSS)
+- sus-crawler/templates/base.html (+16 lines focus CSS)
+
+#### Test Evidence:
+- Screenshots:
+  - feature-115-focus-ring-improved-link.png - Focus on "Sus Repo Finder" link
+  - feature-115-focus-ring-dashboard-link.png - Focus on "Dashboard" link
+  - feature-115-focus-ring-search-input.png - Focus on search input
+  - feature-115-focus-ring-button.png - Focus on "Browse All Crates" button
+  - feature-115-crawler-focus-link.png - Focus on "Crawler Portal" link
+  - feature-115-crawler-focus-button.png - Focus on "Start Crawler" button
+- Console errors: Only favicon 404 (cosmetic)
+
+#### Commit:
+- e476369: Implement Feature #115: Focus ring visible on focused elements
+
+#### Current Completion Status:
+- Features passing: 73/170 (42.9%)
+- Feature #115 (Focus ring visible on focused elements) - PASSING ✅
+
