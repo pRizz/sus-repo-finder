@@ -35,6 +35,22 @@
         code, pre {
             font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
         }
+        /* Accessibility: Focus ring styles for keyboard navigation */
+        a:focus-visible,
+        button:focus-visible,
+        input:focus-visible,
+        select:focus-visible,
+        textarea:focus-visible,
+        [role="button"]:focus-visible,
+        [tabindex]:focus-visible {
+            outline: 2px solid #58a6ff;
+            outline-offset: 2px;
+        }
+        /* Remove outline for mouse users (only show for keyboard navigation) */
+        a:focus:not(:focus-visible),
+        button:focus:not(:focus-visible) {
+            outline: none;
+        }
         /* Loading overlay styles */
         #loading-overlay {
             position: fixed;
@@ -130,8 +146,10 @@
                     </div>
                 </div>
                 <div class="flex items-center ml-2 sm:ml-4">
-                    <form action="/crates" method="get" class="search-form relative" id="search-form">
-                        <input type="search" name="search" placeholder="Search..."
+                    <form action="/crates" method="get" class="search-form relative" id="search-form" role="search">
+                        <label for="nav-search" class="sr-only">Search crates</label>
+                        <input type="search" id="nav-search" name="search" placeholder="Search..."
+                               aria-label="Search crates"
                                class="bg-dark-bg border border-dark-border rounded-lg px-3 sm:px-4 py-2 pr-8 sm:pr-10 text-sm text-gray-200 placeholder-gray-400 focus:outline-none focus:border-blue-500 w-28 sm:w-48 lg:w-64">
                         <div class="search-spinner"></div>
                     </form>
