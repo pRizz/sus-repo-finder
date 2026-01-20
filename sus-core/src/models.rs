@@ -106,3 +106,25 @@ pub struct QueueItem {
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
 }
+
+/// Dashboard statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DashboardStats {
+    pub total_crates: i64,
+    pub total_findings: i64,
+    pub high_severity: i64,
+    pub medium_severity: i64,
+    pub low_severity: i64,
+}
+
+/// A recent finding for the dashboard
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct RecentFinding {
+    pub id: i64,
+    pub crate_name: String,
+    pub version: String,
+    pub issue_type: String,
+    pub severity: String,
+    pub summary: Option<String>,
+    pub created_at: String,
+}

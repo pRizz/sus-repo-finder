@@ -1,7 +1,7 @@
 //! HTML templates for the dashboard
 
 use askama::Template;
-use sus_core::CrateWithStats;
+use sus_core::{CrateWithStats, DashboardStats, RecentFinding};
 
 /// Filter to format download counts with K/M suffixes
 pub mod filters {
@@ -35,6 +35,33 @@ pub mod filters {
             Ok("s")
         }
     }
+
+    /// Format issue type for display
+    pub fn format_issue_type(issue_type: &str) -> askama::Result<String> {
+        match issue_type {
+            "network" => Ok("Network Call".to_string()),
+            "file_access" => Ok("File Access".to_string()),
+            "shell_command" => Ok("Shell Command".to_string()),
+            "process_spawn" => Ok("Process Spawn".to_string()),
+            "env_access" => Ok("Env Access".to_string()),
+            "dynamic_lib" => Ok("Dynamic Library".to_string()),
+            "unsafe_block" => Ok("Unsafe Block".to_string()),
+            "build_download" => Ok("Build Download".to_string()),
+            "sensitive_path" => Ok("Sensitive Path".to_string()),
+            "obfuscation" => Ok("Obfuscation".to_string()),
+            "compiler_flags" => Ok("Compiler Flags".to_string()),
+            "macro_codegen" => Ok("Macro Codegen".to_string()),
+            other => Ok(other.to_string()),
+        }
+    }
+}
+
+/// Landing page template
+#[derive(Template)]
+#[template(path = "landing.html")]
+pub struct LandingTemplate {
+    pub stats: DashboardStats,
+    pub recent_findings: Vec<RecentFinding>,
 }
 
 /// Crate list page template
