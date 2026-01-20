@@ -1,0 +1,4 @@
+{
+  "source": "fn main() {\n    println!(\"cargo:rustc-env=SECRET_KEY=hidden123\");\n    println!(\"cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN\");\n    println!(\"cargo:rustc-flags=-l dylib=foo\");\n    println!(\"cargo:warning=This crate is deprecated\");\n}",
+  "file_path": "build.rs"
+}

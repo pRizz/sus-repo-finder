@@ -1,0 +1,4 @@
+{
+  "source": "fn main() {\n    println!(\"cargo:rustc-link-lib=ssl\");\n    println!(\"cargo:rustc-link-search=/opt/openssl/lib\");\n    println!(\"cargo:rustc-cfg=feature=\\\"openssl\\\"\");\n    println!(\"cargo:rerun-if-changed=build.rs\");\n}",
+  "file_path": "build.rs"
+}
