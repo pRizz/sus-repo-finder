@@ -1,9 +1,10 @@
 //! API routes for the crawler web portal
 
+use askama::Template;
 use axum::{
     extract::Path,
     http::StatusCode,
-    response::{IntoResponse, Json},
+    response::{Html, IntoResponse, Json, Response},
     routing::get,
     Router,
 };
@@ -11,7 +12,27 @@ use serde_json::json;
 use std::sync::Arc;
 use sus_core::Database;
 
+use crate::templates::StatusTemplate;
 use sus_crawler::CratesIoClient;
+
+/// Wrapper for rendering Askama templates as HTML responses
+pub struct HtmlTemplate<T>(pub T);
+
+impl<T> IntoResponse for HtmlTemplate<T>
+where
+    T: Template,
+{
+    fn into_response(self) -> Response {
+        match self.0.render() {
+            Ok(html) => Html(html).into_response(),
+            Err(err) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to render template: {}", err),
+            )
+                .into_response(),
+        }
+    }
+}
 
 /// Application state shared across handlers
 pub struct AppState {
@@ -41,12 +62,24 @@ pub fn create_router(db: Database) -> Router {
         .route("/api/crawler/pause", axum::routing::post(pause))
         .route("/api/crawler/resume", axum::routing::post(resume))
         // Test endpoint to fetch crate metadata from crates.io
-        .route("/api/crawler/test-crate/{name}", get(test_crate))
+        .route("/api/crawler/test-crate/:name", get(test_crate))
         .with_state(state)
 }
 
-async fn index() -> &'static str {
-    "Crawler Portal - Status Page (TODO: implement template)"
+/// Crawler status page (main page)
+async fn index() -> impl IntoResponse {
+    // TODO: Fetch real stats from database when crawler is implemented
+    let template = StatusTemplate::new(
+        "idle",
+        0,     // crates_scanned
+        0,     // findings_count
+        0,     // errors_count
+        0,     // queue_size
+        None,  // current_crate
+        0.0,   // progress_percent
+    );
+
+    HtmlTemplate(template)
 }
 
 async fn detailed() -> &'static str {
@@ -57,28 +90,54 @@ async fn errors() -> &'static str {
     "Crawler Portal - Errors Page (TODO: implement template)"
 }
 
-async fn status() -> &'static str {
-    r#"{"status": "idle", "current_crate": null}"#
+async fn status() -> impl IntoResponse {
+    // Return JSON status for API consumers
+    Json(json!({
+        "status": "idle",
+        "current_crate": null,
+        "crates_scanned": 0,
+        "findings_count": 0,
+        "errors_count": 0,
+        "queue_size": 0,
+        "progress_percent": 0.0
+    }))
 }
 
-async fn stats() -> &'static str {
-    r#"{"crates_scanned": 0, "findings_count": 0, "errors_count": 0}"#
+async fn stats() -> impl IntoResponse {
+    Json(json!({
+        "crates_scanned": 0,
+        "findings_count": 0,
+        "errors_count": 0,
+        "queue_size": 0
+    }))
 }
 
-async fn queue() -> &'static str {
-    r#"{"pending": 0, "items": []}"#
+async fn queue() -> impl IntoResponse {
+    Json(json!({
+        "pending": 0,
+        "items": []
+    }))
 }
 
-async fn api_errors() -> &'static str {
-    r#"{"errors": []}"#
+async fn api_errors() -> impl IntoResponse {
+    Json(json!({
+        "errors": [],
+        "total": 0
+    }))
 }
 
-async fn pause() -> &'static str {
-    r#"{"success": true, "status": "paused"}"#
+async fn pause() -> impl IntoResponse {
+    Json(json!({
+        "success": true,
+        "status": "paused"
+    }))
 }
 
-async fn resume() -> &'static str {
-    r#"{"success": true, "status": "running"}"#
+async fn resume() -> impl IntoResponse {
+    Json(json!({
+        "success": true,
+        "status": "running"
+    }))
 }
 
 /// Test endpoint to fetch crate metadata from crates.io API
