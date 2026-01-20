@@ -4,15 +4,16 @@ use askama::Template;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::{Html, IntoResponse, Response},
+    response::{Html, IntoResponse, Json, Response},
     routing::get,
     Router,
 };
 use serde::Deserialize;
+use serde_json::json;
 use std::sync::Arc;
 use sus_core::Database;
 
-use crate::templates::{CrateDetailTemplate, CrateListTemplate, LandingTemplate};
+use crate::templates::{CrateDetailTemplate, CrateListTemplate, LandingTemplate, NotFoundTemplate};
 
 /// Application state shared across handlers
 pub struct AppState {
@@ -41,7 +42,13 @@ pub fn create_router(db: Database) -> Router {
         .route("/api/crates/{name}/compare", get(api_compare))
         .route("/api/findings/recent", get(api_recent_findings))
         .route("/api/findings/interesting", get(api_interesting))
+        .fallback(not_found_handler)
         .with_state(state)
+}
+
+/// Handler for 404 Not Found pages
+async fn not_found_handler() -> impl IntoResponse {
+    (StatusCode::NOT_FOUND, HtmlTemplate(NotFoundTemplate))
 }
 
 /// Wrapper for HTML responses from Askama templates
@@ -189,12 +196,83 @@ async fn crate_compare() -> &'static str {
     "Sus Dashboard - Version Comparison (TODO: implement template)"
 }
 
-async fn stats() -> &'static str {
-    r#"{"total_crates": 0, "total_findings": 0, "by_severity": {"high": 0, "medium": 0, "low": 0}}"#
+async fn stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.db.get_dashboard_stats().await {
+        Ok(stats) => Json(json!({
+            "total_crates": stats.total_crates,
+            "total_findings": stats.total_findings,
+            "by_severity": {
+                "high": stats.high_severity,
+                "medium": stats.medium_severity,
+                "low": stats.low_severity
+            }
+        }))
+        .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": format!("Database error: {}", err),
+                "message": "Failed to fetch dashboard statistics"
+            })),
+        )
+            .into_response(),
+    }
 }
 
-async fn api_crates() -> &'static str {
-    r#"{"crates": [], "total": 0, "page": 1, "per_page": 20}"#
+/// Query parameters for crate list API
+#[derive(Debug, Deserialize)]
+pub struct CrateListQuery {
+    pub page: Option<u32>,
+    pub per_page: Option<u32>,
+    pub severity: Option<String>,
+    pub issue_type: Option<String>,
+    pub search: Option<String>,
+    pub sort: Option<String>,
+}
+
+async fn api_crates(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<CrateListQuery>,
+) -> impl IntoResponse {
+    let page = query.page.unwrap_or(1);
+    let per_page = query.per_page.unwrap_or(20).min(100); // Cap at 100
+
+    match state.db.get_crates().await {
+        Ok(crates) => {
+            let total = crates.len() as u32;
+            let start = ((page - 1) * per_page) as usize;
+            let end = (start + per_page as usize).min(crates.len());
+            let page_crates = if start < crates.len() {
+                &crates[start..end]
+            } else {
+                &[]
+            };
+
+            Json(json!({
+                "crates": page_crates.iter().map(|c| json!({
+                    "id": c.id,
+                    "name": c.name,
+                    "description": c.description,
+                    "repo_url": c.repo_url,
+                    "download_count": c.download_count,
+                    "finding_count": c.finding_count,
+                    "max_severity": c.max_severity
+                })).collect::<Vec<_>>(),
+                "total": total,
+                "page": page,
+                "per_page": per_page
+            }))
+            .into_response()
+        }
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": format!("Database error: {}", err),
+                "message": "Failed to fetch crate list"
+            })),
+        )
+            .into_response(),
+    }
 }
 
 async fn api_crate_detail() -> &'static str {

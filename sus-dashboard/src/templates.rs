@@ -81,3 +81,8 @@ pub struct CrateDetailTemplate {
     pub findings: Vec<AnalysisResultRow>,
     pub selected_version: Option<String>,
 }
+
+/// 404 Not Found page template
+#[derive(Template)]
+#[template(path = "not_found.html")]
+pub struct NotFoundTemplate;
