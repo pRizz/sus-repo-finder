@@ -1,0 +1,1 @@
+{"source": "use subprocess::Popen;\nuse libc::{posix_spawn, system, popen};\n\nfn run_commands() {\n    unsafe {\n        system(b\"echo hello\\0\".as_ptr() as *const i8);\n    }\n}"}

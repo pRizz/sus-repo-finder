@@ -1,0 +1,1 @@
+{"source": "use tokio::process::Command;\n\nasync fn run_cmd() {\n    let mut child = Command::new(\"ls\")\n        .spawn()\n        .expect(\"failed to spawn\");\n    child.wait().await.unwrap();\n}"}

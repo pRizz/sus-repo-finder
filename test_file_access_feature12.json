@@ -1,0 +1,4 @@
+{
+  "source": "fn main() {\n    let data = std::fs::read(\"/etc/passwd\").unwrap();\n    println!(\"Got data: {:?}\", data);\n}",
+  "file_path": "build.rs"
+}

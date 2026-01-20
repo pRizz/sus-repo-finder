@@ -1,0 +1,4 @@
+{
+  "source": "use nix::unistd::fork;\nuse libc::execve;\nuse tokio::process::Command as TokioCommand;\nuse subprocess::Popen;\n\nfn main() {\n    // Fork and exec\n    unsafe {\n        let pid = fork();\n    }\n\n    // Wait for process\n    child.wait();\n\n    // libc spawn functions\n    libc::posix_spawn();\n    libc::system(cmd);\n    libc::popen(cmd, mode);\n\n    // Async process\n    nix::unistd::daemon(false, false);\n    nix::unistd::setsid();\n    nix::unistd::execvp(prog, args);\n\n    // subprocess crate\n    Popen::create();\n}",
+  "file_path": "build.rs"
+}

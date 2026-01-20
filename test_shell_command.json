@@ -1,0 +1,3 @@
+{
+  "source": "use std::process::Command;\n\nfn main() {\n    let output = Command::new(\"bash\")\n        .arg(\"-c\")\n        .arg(\"echo hello\")\n        .output()\n        .expect(\"failed\");\n}"
+}

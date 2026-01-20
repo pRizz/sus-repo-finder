@@ -1,0 +1,1 @@
+{"source": "use nix::unistd::fork;\nuse libc::execve;\n\nfn main() {\n    unsafe {\n        fork();\n        execve(std::ptr::null(), std::ptr::null(), std::ptr::null());\n    }\n}"}

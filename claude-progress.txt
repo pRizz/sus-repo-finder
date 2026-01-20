@@ -4646,3 +4646,95 @@ Invalid query params don't crash - verify that malformed URL parameters are hand
 #### Current Completion Status:
 - Features passing: 65/170 (38.2%)
 - Feature #103 (Malformed URL parameters handled) - PASSING ✅
+[Testing] Session complete - verified feature #149
+[Testing] Feature #23 (Severity classification is correct for each pattern) verified - still passing
+
+### Verification Details:
+- Step 1: Network calls are Medium severity ✅ (code: IssueType::Network => Severity::Medium)
+- Step 2: Sensitive path access is High severity ✅ (code: IssueType::SensitivePath => Severity::High)
+- Step 3: Env access to sensitive vars is High severity ✅ (code: is_sensitive => Severity::High)
+- Step 4: Generic unsafe blocks are Low severity ✅ (code: IssueType::UnsafeBlock => Severity::Low)
+- Step 5: Shell commands are Medium severity ✅ (code: IssueType::ShellCommand => Severity::Medium)
+
+### Evidence:
+- Reviewed patterns.rs default_severity() function
+- Reviewed detector.rs for special severity handling (sensitive env vars, suspicious unsafe blocks)
+- Verified UI displays correct severities for findings
+- Screenshots: feature-23-dashboard-severities.png, feature-23-anyhow-findings.png, feature-23-final-verification.png
+- No console errors
+[Testing] Session complete - verified feature #23
+
+## Session: 2026-01-20 (Agent - Feature #108)
+
+### Feature #108: Tablet layout correct at 768px
+**Status: PASSING** ✅
+
+#### Feature Description:
+Tablet view adapts properly - verify that at 768px width the dashboard layout adapts correctly for tablet devices.
+
+#### Verification Steps:
+
+**Step 1: Set viewport to 768px width** ✅
+- Set browser viewport to 768x1024 (standard tablet portrait)
+- Viewport successfully configured
+
+**Step 2: Load dashboard** ✅
+- Navigated to http://localhost:3002/
+- Dashboard landing page loaded successfully
+- Layout adapted properly:
+  - Navigation bar: Logo, nav links, search bar all visible and accessible
+  - Stats cards: Displayed in 2x2 grid layout
+  - Recent findings: Full-width cards with proper spacing
+  - Footer: All links visible and working
+
+**Step 3: Verify layout adapts** ✅
+- Dashboard (landing page):
+  - Stats cards in 2-column grid
+  - Hero section centered and readable
+  - "Browse All Crates" button prominent
+  
+- Crate list page:
+  - Table adapts with essential columns (Crate, Downloads, Findings)
+  - Sort dropdown accessible
+  - Pagination visible with page numbers (md breakpoint triggers at 768px)
+  - "Showing X to Y of Z results" text visible
+  
+- Crate detail page:
+  - Header with crate info properly laid out
+  - Tabs (Findings, Version Comparison) and version selector accessible
+  - Finding cards full-width with code snippets readable
+  
+- Crawler portal:
+  - Stats cards in 2x2 grid
+  - Queue table properly displayed
+  - Start Crawler button visible
+
+**Step 4: Verify sidebar collapses if applicable** ✅
+- Reviewed codebase: No sidebar exists in current implementation
+- App uses dropdown/select for sorting instead of sidebar filters
+- This is a design simplification from original spec
+- Responsive elements work correctly:
+  - Page numbers visible at md breakpoint (768px+)
+  - "Showing X to Y" text visible at sm breakpoint (640px+)
+
+#### Pages Verified at 768px:
+- Dashboard landing page ✅
+- Crate list page ✅
+- Crate detail page (anyhow) ✅
+- Crawler portal ✅
+
+#### Test Evidence:
+- Screenshots:
+  - feature-108-tablet-dashboard-768px.png
+  - feature-108-tablet-crates-768px.png
+  - feature-108-tablet-crate-detail-768px.png
+  - feature-108-tablet-crawler-portal-768px.png
+  - feature-108-tablet-pagination-768px.png (full page)
+- Console errors: None (only favicon 404 and Tailwind CDN warning - both cosmetic/expected)
+
+#### Commit:
+- [pending]
+
+#### Current Completion Status:
+- Features passing: 67/170 (39.4%)
+- Feature #108 (Tablet layout correct at 768px) - PASSING ✅

@@ -4,7 +4,7 @@ import json
 
 conn = sqlite3.connect('/Users/peterryszkiewicz/Repos/sus-repo-finder/features.db')
 cur = conn.cursor()
-cur.execute('SELECT id, name, description, steps, passes, in_progress FROM features WHERE id = 12')
+cur.execute('SELECT id, name, description, steps, passes, in_progress FROM features WHERE id = 9')
 row = cur.fetchone()
 if row:
     print(f"ID: {row[0]}")
