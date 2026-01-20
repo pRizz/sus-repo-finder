@@ -11,7 +11,7 @@ use axum::{
 use std::sync::Arc;
 use sus_core::Database;
 
-use crate::templates::CrateListTemplate;
+use crate::templates::{CrateListTemplate, LandingTemplate};
 
 /// Application state shared across handlers
 pub struct AppState {
@@ -65,8 +65,28 @@ where
     }
 }
 
-async fn index() -> &'static str {
-    "Sus Dashboard - Landing Page (TODO: implement template)"
+async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    // Fetch dashboard stats and recent findings from database
+    let stats_result = state.db.get_dashboard_stats().await;
+    let findings_result = state.db.get_recent_findings(10).await;
+
+    match (stats_result, findings_result) {
+        (Ok(stats), Ok(recent_findings)) => {
+            HtmlTemplate(LandingTemplate {
+                stats,
+                recent_findings,
+            })
+            .into_response()
+        }
+        (Err(err), _) | (_, Err(err)) => {
+            tracing::error!("Database error loading dashboard: {}", err);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Database error: {}", err),
+            )
+                .into_response()
+        }
+    }
 }
 
 async fn crate_list(State(state): State<Arc<AppState>>) -> impl IntoResponse {

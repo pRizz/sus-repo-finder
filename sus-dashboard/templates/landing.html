@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Sus Repo Finder - Dashboard{% endblock %}
+
+{% block content %}
+<div class="space-y-8">
+    <!-- Hero Section -->
+    <div class="text-center py-8">
+        <h1 class="text-4xl font-bold text-white mb-4">Sus Repo Finder</h1>
+        <p class="text-xl text-gray-400 max-w-2xl mx-auto">
+            Detecting suspicious patterns in Rust crates' build.rs files and proc-macros.
+            Helping the community identify potentially risky build-time code.
+        </p>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <!-- Total Crates -->
+        <div class="bg-dark-surface rounded-lg border border-dark-border p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <svg class="h-8 w-8 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                    </svg>
+                </div>
+                <div class="ml-5">
+                    <p class="text-sm font-medium text-gray-400">Crates Scanned</p>
+                    <p class="text-3xl font-bold text-white">{{ stats.total_crates }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Total Findings -->
+        <div class="bg-dark-surface rounded-lg border border-dark-border p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <svg class="h-8 w-8 text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                </div>
+                <div class="ml-5">
+                    <p class="text-sm font-medium text-gray-400">Total Findings</p>
+                    <p class="text-3xl font-bold text-white">{{ stats.total_findings }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- High Severity -->
+        <div class="bg-dark-surface rounded-lg border border-dark-border p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="h-8 w-8 rounded-full bg-severity-high/20 flex items-center justify-center">
+                        <span class="text-severity-high font-bold text-sm">H</span>
+                    </div>
+                </div>
+                <div class="ml-5">
+                    <p class="text-sm font-medium text-gray-400">High Severity</p>
+                    <p class="text-3xl font-bold text-severity-high">{{ stats.high_severity }}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Medium + Low -->
+        <div class="bg-dark-surface rounded-lg border border-dark-border p-6">
+            <div class="flex items-center">
+                <div class="flex-shrink-0">
+                    <div class="flex -space-x-1">
+                        <div class="h-8 w-8 rounded-full bg-severity-medium/20 flex items-center justify-center">
+                            <span class="text-severity-medium font-bold text-sm">M</span>
+                        </div>
+                        <div class="h-6 w-6 rounded-full bg-severity-low/20 flex items-center justify-center border-2 border-dark-surface">
+                            <span class="text-severity-low font-bold text-xs">L</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="ml-5">
+                    <p class="text-sm font-medium text-gray-400">Medium / Low</p>
+                    <p class="text-2xl font-bold">
+                        <span class="text-severity-medium">{{ stats.medium_severity }}</span>
+                        <span class="text-gray-500 mx-1">/</span>
+                        <span class="text-severity-low">{{ stats.low_severity }}</span>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="flex flex-col sm:flex-row gap-4 justify-center">
+        <a href="/crates" class="inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-lg text-white bg-blue-600 hover:bg-blue-700 transition-colors">
+            <svg class="mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+            </svg>
+            Browse All Crates
+        </a>
+    </div>
+
+    <!-- Recent Findings Section -->
+    <div class="bg-dark-surface rounded-lg border border-dark-border overflow-hidden">
+        <div class="px-6 py-4 border-b border-dark-border">
+            <h2 class="text-xl font-semibold text-white">Recent Findings</h2>
+            <p class="text-sm text-gray-400 mt-1">Latest suspicious patterns detected</p>
+        </div>
+
+        {% if recent_findings.is_empty() %}
+        <div class="p-12 text-center">
+            <svg class="mx-auto h-12 w-12 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <h3 class="mt-2 text-lg font-medium text-gray-200">No findings yet</h3>
+            <p class="mt-1 text-sm text-gray-400">The crawler hasn't detected any suspicious patterns yet.</p>
+        </div>
+        {% else %}
+        <div class="divide-y divide-dark-border">
+            {% for finding in recent_findings %}
+            <div class="px-6 py-4 hover:bg-dark-bg transition-colors">
+                <div class="flex items-start justify-between">
+                    <div class="flex-1 min-w-0">
+                        <a href="/crates/{{ finding.crate_name }}" class="text-blue-400 hover:text-blue-300 font-medium">
+                            {{ finding.crate_name }}
+                        </a>
+                        <span class="text-gray-500 text-sm ml-2">v{{ finding.version }}</span>
+                        {% if let Some(summary) = finding.summary.as_ref() %}
+                        <p class="text-sm text-gray-400 mt-1 truncate">{{ summary }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="flex items-center gap-2 ml-4">
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
+                            {% if finding.severity == "high" %}bg-severity-high/20 text-severity-high{% endif %}
+                            {% if finding.severity == "medium" %}bg-severity-medium/20 text-severity-medium{% endif %}
+                            {% if finding.severity == "low" %}bg-severity-low/20 text-severity-low{% endif %}">
+                            {{ finding.severity }}
+                        </span>
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-dark-bg text-gray-400">
+                            {{ finding.issue_type|format_issue_type }}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- About Section -->
+    <div class="bg-dark-surface rounded-lg border border-dark-border p-6">
+        <h2 class="text-xl font-semibold text-white mb-4">About Sus Repo Finder</h2>
+        <div class="prose prose-invert max-w-none text-gray-300">
+            <p class="mb-3">
+                Sus Repo Finder scans Rust crates for potentially suspicious patterns in build scripts
+                and procedural macros. These patterns might indicate security risks such as:
+            </p>
+            <ul class="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-gray-400 mb-3">
+                <li class="flex items-center">
+                    <span class="w-2 h-2 bg-severity-high rounded-full mr-2"></span>
+                    Network calls during build
+                </li>
+                <li class="flex items-center">
+                    <span class="w-2 h-2 bg-severity-high rounded-full mr-2"></span>
+                    Accessing sensitive paths
+                </li>
+                <li class="flex items-center">
+                    <span class="w-2 h-2 bg-severity-medium rounded-full mr-2"></span>
+                    Shell command execution
+                </li>
+                <li class="flex items-center">
+                    <span class="w-2 h-2 bg-severity-medium rounded-full mr-2"></span>
+                    Environment variable access
+                </li>
+                <li class="flex items-center">
+                    <span class="w-2 h-2 bg-severity-low rounded-full mr-2"></span>
+                    Unsafe code blocks
+                </li>
+                <li class="flex items-center">
+                    <span class="w-2 h-2 bg-severity-low rounded-full mr-2"></span>
+                    Obfuscated code patterns
+                </li>
+            </ul>
+            <p class="text-sm text-gray-500">
+                Note: Not all findings indicate malicious intent. Many legitimate crates have valid
+                reasons for these patterns. Always review findings in context.
+            </p>
+        </div>
+    </div>
+</div>
+{% endblock %}
