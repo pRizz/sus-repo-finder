@@ -907,6 +907,28 @@ impl Database {
         Ok(())
     }
 
+    /// Get the currently in-progress queue item (if any)
+    ///
+    /// Returns the first queue item with status 'in_progress', ordered by started_at.
+    /// This is useful for displaying which crate is currently being processed.
+    pub async fn get_in_progress_queue_item(
+        &self,
+    ) -> Result<Option<crate::models::QueueItemRow>, sqlx::Error> {
+        let item = sqlx::query_as::<_, crate::models::QueueItemRow>(
+            r#"
+            SELECT id, crate_name, version, priority, status, added_at, started_at, completed_at
+            FROM crawler_queue
+            WHERE status = 'in_progress'
+            ORDER BY started_at ASC
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(item)
+    }
+
     /// Clear all pending items from the queue
     pub async fn clear_pending_queue(&self) -> Result<u64, sqlx::Error> {
         let result = sqlx::query("DELETE FROM crawler_queue WHERE status = 'pending'")

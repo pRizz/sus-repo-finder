@@ -170,6 +170,21 @@ async fn index(
     let findings_count = state.db.get_findings_count().await.unwrap_or(0);
     let queue_size = state.db.get_pending_queue_count().await.unwrap_or(0);
 
+    // Fetch the currently in-progress crate (if any)
+    let in_progress_item = state.db.get_in_progress_queue_item().await.ok().flatten();
+    let current_crate = in_progress_item.as_ref().map(|item| {
+        format!("{} v{}", item.crate_name, item.version)
+    });
+
+    // Determine status based on whether there's processing happening
+    let status = if in_progress_item.is_some() {
+        "running"
+    } else if queue_size > 0 {
+        "paused"
+    } else {
+        "idle"
+    };
+
     // Fetch pending queue items (limited to 10 for display)
     let queue_items_rows = state
         .db
@@ -186,13 +201,13 @@ async fn index(
         .collect();
 
     let template = StatusTemplate::new(
-        "idle",
+        status,
         crates_scanned,
         findings_count,
         0, // errors_count - TODO: fetch from database
         queue_size,
-        None, // current_crate
-        0.0,  // progress_percent
+        current_crate.as_deref(),
+        0.0, // progress_percent
         queue_items,
     );
 
