@@ -2,12 +2,13 @@
 
 use askama::Template;
 use axum::{
-    extract::{Path, Query, State},
-    http::StatusCode,
+    extract::{FromRequestParts, Path, Query, State, rejection::QueryRejection},
+    http::{request::Parts, StatusCode},
     response::{Html, IntoResponse, Json, Response},
     routing::get,
     Router,
 };
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -17,6 +18,51 @@ use crate::templates::{
     CrateDetailTemplate, CrateListTemplate, ErrorTemplate, LandingTemplate, NotFoundTemplate,
     PageNumber,
 };
+
+/// Custom query extractor that renders a styled error page on parse failure
+pub struct GracefulQuery<T>(pub T);
+
+impl<T, S> FromRequestParts<S> for GracefulQuery<T>
+where
+    T: DeserializeOwned + Send,
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match Query::<T>::from_request_parts(parts, state).await {
+            Ok(Query(value)) => Ok(GracefulQuery(value)),
+            Err(rejection) => {
+                // Extract a user-friendly error message
+                let detail = match &rejection {
+                    QueryRejection::FailedToDeserializeQueryString(err) => {
+                        // Parse the error message to get useful info
+                        let msg = err.body_text();
+                        // Common patterns: "page: invalid digit found in string"
+                        if msg.contains("invalid digit found in string") {
+                            "Expected a number but received text".to_string()
+                        } else if msg.contains("expected") {
+                            "Parameter type mismatch".to_string()
+                        } else {
+                            "One or more parameters have invalid values".to_string()
+                        }
+                    }
+                    _ => "Invalid query parameters".to_string(),
+                };
+
+                // Render the styled error page
+                let template = ErrorTemplate::bad_request(&detail);
+                match template.render() {
+                    Ok(html) => Err((StatusCode::BAD_REQUEST, Html(html)).into_response()),
+                    Err(_) => Err((
+                        StatusCode::BAD_REQUEST,
+                        "Invalid URL parameters",
+                    ).into_response()),
+                }
+            }
+        }
+    }
+}
 
 /// Application state shared across handlers
 pub struct AppState {
@@ -120,7 +166,7 @@ pub struct CrateListPageQuery {
 
 async fn crate_list(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<CrateListPageQuery>,
+    GracefulQuery(query): GracefulQuery<CrateListPageQuery>,
 ) -> impl IntoResponse {
     let page = query.page.unwrap_or(1).max(1);
     let per_page = query.per_page.unwrap_or(10).clamp(1, 100);
@@ -211,7 +257,7 @@ pub struct CrateDetailQuery {
 async fn crate_detail(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
-    Query(query): Query<CrateDetailQuery>,
+    GracefulQuery(query): GracefulQuery<CrateDetailQuery>,
 ) -> impl IntoResponse {
     // Get crate info
     let crate_result = state.db.get_crate_by_name(&name).await;

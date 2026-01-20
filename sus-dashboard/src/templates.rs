@@ -168,4 +168,18 @@ impl ErrorTemplate {
             error_type: "server_error".to_string(),
         }
     }
+
+    /// Create a bad request error page for malformed URL parameters
+    pub fn bad_request(detail: &str) -> Self {
+        Self {
+            title: "Invalid Request".to_string(),
+            error_code: "400".to_string(),
+            heading: "Invalid URL Parameters".to_string(),
+            message: format!(
+                "The URL contains invalid parameters. {}. Please check the URL and try again.",
+                detail
+            ),
+            error_type: "bad_request".to_string(),
+        }
+    }
 }
