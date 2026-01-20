@@ -5781,3 +5781,62 @@ User knows their location - Breadcrumbs show navigation path through the applica
 #### Current Completion Status:
 - Features passing: 84/170 (49.4%)
 - Feature #157 (Breadcrumbs show navigation path) - PASSING ✅
+[Testing] Feature #152 (Cargo fmt passes) verified - still passing
+[Testing] Session complete - verified feature #152 (no regression found)
+
+
+## Session: 2026-01-20 (Agent - Feature #151)
+
+### Feature #151: Tests exist for pattern detection
+**Status: PASSING**
+
+#### Feature Description:
+Unit tests cover detectors - verify that tests exist for each pattern type in the sus-detector crate.
+
+#### Verification Steps:
+
+**Step 1: Run cargo test in sus-detector**
+- Ran cargo test --package sus-detector
+- Initially found 126 passed, 1 failed (test_detect_hex_string_literal)
+
+**Step 2: Analyze and fix failing test**
+- Issue 1: is_multiple_of() is a nightly feature, replaced with modulo operator
+- Issue 2: Hex strings were being detected as base64 (hex chars are subset of base64)
+- Fixed by reordering detection: check hex FIRST, then base64
+
+**Step 3: Verify tests for each pattern type**
+Tests exist for 11 out of 12 pattern types:
+- Network: 8 tests
+- FileAccess: 8 tests
+- ShellCommand: 11 tests
+- EnvAccess: 14 tests
+- UnsafeBlock: 8 tests
+- SensitivePath: 15 tests
+- Obfuscation: 15 tests
+- DynamicLib: 15 tests
+- ProcessSpawn: 15 tests
+- BuildDownload: 12 tests
+- CompilerFlags: 12 tests
+- MacroCodegen: Not implemented (defined but no detector yet)
+
+**Step 4: Verify tests pass**
+- Final result: 127 passed, 0 failed
+- All tests pass after fixes
+
+#### Code Changes Made:
+1. sus-detector/src/detector.rs:
+   - Replaced s.len().is_multiple_of(4) with s.len() % 4 == 0
+   - Replaced s.len().is_multiple_of(2) with s.len() % 2 == 0
+   - Reordered detection in visit_expr_lit(): check hex before base64
+   - Added comment explaining the ordering rationale
+
+#### Test Evidence:
+test result: ok. 127 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+#### Commits:
+- 7cbae03: Fix pattern detection tests in sus-detector
+- 0c05f17: Apply cargo fmt formatting
+
+#### Current Completion Status:
+- Features passing: 85/170 (50.0%)
+- Feature #151 (Tests exist for pattern detection) - PASSING
