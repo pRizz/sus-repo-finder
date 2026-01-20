@@ -6058,3 +6058,57 @@ Detects proc-macros that write files - verifies that the pattern detector can id
 #### Current Completion Status:
 - Features passing: 86/170 (50.6%)
 - Feature #22 (Pattern detector identifies macro code generation) - PASSING ✅
+[Testing] Feature #8 (README exists with project overview) verified - still passing
+
+
+## Session: 2026-01-20 (Agent - Feature #161)
+
+### Feature #161: Proc-macro crates detected and analyzed
+**Status: PASSING** ✅
+
+#### Feature Description:
+Proc-macro crates flagged appropriately - verifies that crates with `proc-macro = true` in their Cargo.toml are properly detected and the `is_proc_macro` flag is stored in the database.
+
+#### Verification Steps:
+
+**Step 1: Analyze crate with proc-macro = true** ✅
+- Database contains 90 proc-macro crates with `is_proc_macro = 1`
+- Real-world proc-macro crates detected: async-trait, strum_macros, num-derive
+- Detection implemented in `sus-crawler/src/downloader.rs` via `check_is_proc_macro()` function
+
+**Step 2: Verify is_proc_macro flag set** ✅
+- async-trait@0.1.89: `is_proc_macro = true` confirmed in API response
+- strum_macros@0.27.2: `is_proc_macro = true` confirmed in API response
+- Database stores the flag correctly for all proc-macro crates
+- API endpoints return `is_proc_macro` field in version data
+
+**Step 3: Verify proc-macro patterns detected** ✅
+- Proc-macro crates are being analyzed (have `last_analyzed` timestamps)
+- Several analyzed proc-macro crates: test-helper-0, sync-helper-3, fast-helper-4
+- Clean proc-macro crates show "No suspicious patterns detected" correctly
+- The detection system works end-to-end
+
+#### Implementation Details:
+- `check_is_proc_macro()` in `sus-crawler/src/downloader.rs` lines 279-289
+- Checks Cargo.toml for `proc-macro = true` or `proc-macro=true`
+- Flag stored via `upsert_version()` in database
+- API returns `is_proc_macro` in `/api/crates/:name` and `/api/crates/:name/versions/:version`
+
+#### Test Evidence:
+- Screenshots:
+  - feature-161-async-trait-detail.png - async-trait crate detail page
+  - feature-161-strum-macros-detail.png - strum_macros crate detail page
+  - feature-161-api-proc-macro-true.png - API response showing is_proc_macro: true
+- Verification scripts:
+  - verify_feature_161.js - automated verification script
+  - check_proc_macro.js - database query script
+- Console errors: None
+
+#### Commit:
+- 457597f: Verify Feature #161: Proc-macro crates detected and analyzed
+
+#### Current Completion Status:
+- Features passing: 88/170 (51.8%)
+- Feature #161 (Proc-macro crates detected and analyzed) - PASSING ✅
+[Testing] Feature #112 (Navigation responsive on mobile) verified - still passing
+[Testing] Session complete - verified feature #112 (no regression found)
