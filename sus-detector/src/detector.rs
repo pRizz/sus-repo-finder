@@ -326,9 +326,17 @@ impl Detector {
         visitor.findings
     }
 
-    fn detect_dynamic_lib(&self, _ast: &syn::File, _source: &str, _path: &str) -> Vec<Finding> {
-        // TODO: Implement dynamic lib detection
-        Vec::new()
+    /// Detect dynamic library loading that could indicate code injection or plugin attacks.
+    ///
+    /// Looks for:
+    /// - libloading crate usage (Library::new, library.get)
+    /// - dlopen/dlsym calls (Unix dynamic linking)
+    /// - LoadLibrary/GetProcAddress (Windows dynamic linking)
+    /// - FFI patterns that indicate runtime code loading
+    fn detect_dynamic_lib(&self, ast: &syn::File, source: &str, path: &str) -> Vec<Finding> {
+        let mut visitor = DynamicLibVisitor::new(source, path);
+        visitor.visit_file(ast);
+        visitor.findings
     }
 
     /// Detect unsafe blocks that could hide malicious behavior.
@@ -1166,6 +1174,181 @@ impl<'a> Visit<'a> for EnvAccessVisitor<'a> {
                 pattern,
                 &format!("Environment module reference detected: {}", path_str),
                 false,
+            );
+        }
+        syn::visit::visit_expr_path(self, node);
+    }
+}
+
+// ============================================================================
+// Dynamic Library Loading Detection
+// ============================================================================
+
+/// Visitor that walks the AST looking for dynamic library loading patterns.
+/// This detects potential code injection through runtime library loading.
+struct DynamicLibVisitor<'a> {
+    source: &'a str,
+    file_path: &'a str,
+    findings: Vec<Finding>,
+}
+
+impl<'a> DynamicLibVisitor<'a> {
+    fn new(source: &'a str, file_path: &'a str) -> Self {
+        Self {
+            source,
+            file_path,
+            findings: Vec::new(),
+        }
+    }
+
+    /// Check if a path segment matches any dynamic library pattern
+    fn matches_dynamic_lib_pattern(path_str: &str) -> bool {
+        for pattern in DYNAMIC_LIB_PATTERNS {
+            if path_str.contains(pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if a method name is a dynamic library loading method
+    fn is_dynamic_lib_method(method_name: &str) -> bool {
+        DYNAMIC_LIB_METHODS.contains(&method_name)
+    }
+
+    /// Get the line number from a span
+    fn get_line_number(&self, span: proc_macro2::Span) -> usize {
+        span.start().line
+    }
+
+    /// Create a finding for a detected dynamic library pattern
+    fn create_finding(&mut self, line: usize, pattern_found: &str, summary: &str) {
+        let (context_before, snippet, context_after) =
+            extract_snippet(self.source, line, line, 3);
+
+        let finding = Finding::new(
+            IssueType::DynamicLib,
+            default_severity(IssueType::DynamicLib),
+            self.file_path.to_string(),
+            line,
+            line,
+            snippet,
+            summary.to_string(),
+        )
+        .with_context(context_before, context_after)
+        .with_details(serde_json::json!({
+            "pattern": pattern_found,
+            "detection_type": "dynamic_lib"
+        }));
+
+        self.findings.push(finding);
+    }
+}
+
+impl<'a> Visit<'a> for DynamicLibVisitor<'a> {
+    /// Check `use` statements for dynamic library crate imports
+    fn visit_item_use(&mut self, node: &'a ItemUse) {
+        let use_str = format_use_tree(&node.tree);
+        if Self::matches_dynamic_lib_pattern(&use_str) {
+            let line = self.get_line_number(node.use_token.span);
+            let pattern = DYNAMIC_LIB_PATTERNS
+                .iter()
+                .find(|p| use_str.contains(*p))
+                .unwrap_or(&"dynamic_lib");
+            self.create_finding(
+                line,
+                pattern,
+                &format!("Dynamic library crate import detected: {}", use_str),
+            );
+        }
+        syn::visit::visit_item_use(self, node);
+    }
+
+    /// Check function calls for dynamic library loading functions
+    fn visit_expr_call(&mut self, node: &'a ExprCall) {
+        if let Expr::Path(ExprPath { path, .. }) = &*node.func {
+            let path_str = format_path(path);
+            if Self::matches_dynamic_lib_pattern(&path_str) {
+                let line = self.get_line_number(path.segments.first().map_or_else(
+                    || proc_macro2::Span::call_site(),
+                    |s| s.ident.span(),
+                ));
+                let pattern = DYNAMIC_LIB_PATTERNS
+                    .iter()
+                    .find(|p| path_str.contains(*p))
+                    .unwrap_or(&"dynamic_lib");
+                self.create_finding(
+                    line,
+                    pattern,
+                    &format!("Dynamic library function call detected: {}", path_str),
+                );
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    /// Check method calls for dynamic library loading methods
+    fn visit_expr_method_call(&mut self, node: &'a ExprMethodCall) {
+        let method_name = node.method.to_string();
+
+        // Check if receiver is a Library type
+        if let Expr::Path(ExprPath { path, .. }) = &*node.receiver {
+            let path_str = format_path(path);
+            if Self::matches_dynamic_lib_pattern(&path_str) {
+                let line = self.get_line_number(node.method.span());
+                self.create_finding(
+                    line,
+                    &path_str,
+                    &format!("Dynamic library method call detected: {}.{}", path_str, method_name),
+                );
+            }
+        }
+
+        // Check for suspicious dynamic lib method names on any receiver
+        // like library.get(), lib.dlsym()
+        if Self::is_dynamic_lib_method(&method_name) {
+            // Also check the context to see if we're dealing with a library
+            let receiver_str = match &*node.receiver {
+                Expr::Path(ExprPath { path, .. }) => format_path(path),
+                Expr::Field(field) => field.member.to_string(),
+                _ => String::new(),
+            };
+
+            // If the receiver looks like it could be a library (contains lib, Library, etc.)
+            if receiver_str.to_lowercase().contains("lib")
+                || receiver_str.to_lowercase().contains("dll")
+                || receiver_str.to_lowercase().contains("handle")
+            {
+                let line = self.get_line_number(node.method.span());
+                self.create_finding(
+                    line,
+                    &method_name,
+                    &format!("Potential dynamic library method call: {}.{}()", receiver_str, method_name),
+                );
+            }
+        }
+
+        syn::visit::visit_expr_method_call(self, node);
+    }
+
+    /// Check path expressions for dynamic library type references
+    fn visit_expr_path(&mut self, node: &'a ExprPath) {
+        let path_str = format_path(&node.path);
+        if Self::matches_dynamic_lib_pattern(&path_str) {
+            let line = self.get_line_number(
+                node.path
+                    .segments
+                    .first()
+                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+            );
+            let pattern = DYNAMIC_LIB_PATTERNS
+                .iter()
+                .find(|p| path_str.contains(*p))
+                .unwrap_or(&"dynamic_lib");
+            self.create_finding(
+                line,
+                pattern,
+                &format!("Dynamic library type reference detected: {}", path_str),
             );
         }
         syn::visit::visit_expr_path(self, node);

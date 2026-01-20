@@ -1392,3 +1392,19 @@ A subsequent session or manual intervention is needed to:
 2. Run `cargo test` to verify unit tests pass
 3. Restart the crawler server
 4. Complete browser-based verification
+[Testing] 2026-01-19 18:49:05 - Regression test for Feature #6 (Dark theme applied by default)
+  - Dashboard (localhost:3002):
+    - Background: #0d1117 (rgb(13, 17, 23)) ✅
+    - Text: light gray (rgb(229, 231, 235)) ✅
+    - CSS classes: bg-dark-bg, text-gray-200, dark ✅
+  - Crawler Portal (localhost:3001):
+    - Background: #0d1117 (rgb(13, 17, 23)) ✅
+    - Text: light gray (rgb(229, 231, 235)) ✅
+    - CSS classes: bg-dark-bg, text-gray-200, dark ✅
+  - Screenshots saved:
+    - .playwright-mcp/regression-test-feature-6-dashboard-dark-theme.png
+    - .playwright-mcp/regression-test-feature-6-crawler-dark-theme.png
+  - Console errors: favicon 404 only (cosmetic)
+  - All 5 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #6 (Dark theme applied by default) still passing
