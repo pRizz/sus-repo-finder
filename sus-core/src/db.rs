@@ -190,6 +190,208 @@ impl Database {
         Ok(crates)
     }
 
+    /// Get crates with pagination support and custom sorting
+    ///
+    /// Returns crates with LIMIT, OFFSET, and sort order based on the sort parameter.
+    ///
+    /// # Arguments
+    /// * `page` - The page number (1-indexed)
+    /// * `per_page` - Number of items per page
+    /// * `sort` - Sort order: "recent" (most recently analyzed), "severity" (highest severity first),
+    ///            "downloads" (most downloads first), or default (updated_at DESC)
+    pub async fn get_crates_paginated_sorted(
+        &self,
+        page: u32,
+        per_page: u32,
+        sort: &str,
+    ) -> Result<Vec<crate::models::CrateWithStats>, sqlx::Error> {
+        let offset = (page.saturating_sub(1)) * per_page;
+
+        // Build the query based on sort parameter
+        let query = match sort {
+            "recent" => {
+                // Sort by most recently analyzed version (MAX(last_analyzed) DESC)
+                r#"
+                SELECT
+                    c.id,
+                    c.name,
+                    c.repo_url,
+                    c.description,
+                    c.download_count,
+                    c.created_at,
+                    c.updated_at,
+                    (SELECT COUNT(*) FROM analysis_results ar
+                     JOIN versions v ON ar.version_id = v.id
+                     WHERE v.crate_id = c.id) as finding_count,
+                    (SELECT MAX(ar.severity) FROM analysis_results ar
+                     JOIN versions v ON ar.version_id = v.id
+                     WHERE v.crate_id = c.id) as max_severity
+                FROM crates c
+                LEFT JOIN versions v ON v.crate_id = c.id
+                GROUP BY c.id
+                ORDER BY MAX(v.last_analyzed) DESC NULLS LAST, c.updated_at DESC
+                LIMIT ? OFFSET ?
+                "#
+            }
+            "severity" => {
+                // Sort by highest severity first (high > medium > low > null)
+                r#"
+                SELECT
+                    c.id,
+                    c.name,
+                    c.repo_url,
+                    c.description,
+                    c.download_count,
+                    c.created_at,
+                    c.updated_at,
+                    (SELECT COUNT(*) FROM analysis_results ar
+                     JOIN versions v ON ar.version_id = v.id
+                     WHERE v.crate_id = c.id) as finding_count,
+                    (SELECT MAX(ar.severity) FROM analysis_results ar
+                     JOIN versions v ON ar.version_id = v.id
+                     WHERE v.crate_id = c.id) as max_severity
+                FROM crates c
+                ORDER BY
+                    CASE
+                        WHEN (SELECT MAX(ar.severity) FROM analysis_results ar
+                              JOIN versions v ON ar.version_id = v.id
+                              WHERE v.crate_id = c.id) = 'high' THEN 1
+                        WHEN (SELECT MAX(ar.severity) FROM analysis_results ar
+                              JOIN versions v ON ar.version_id = v.id
+                              WHERE v.crate_id = c.id) = 'medium' THEN 2
+                        WHEN (SELECT MAX(ar.severity) FROM analysis_results ar
+                              JOIN versions v ON ar.version_id = v.id
+                              WHERE v.crate_id = c.id) = 'low' THEN 3
+                        ELSE 4
+                    END,
+                    c.updated_at DESC
+                LIMIT ? OFFSET ?
+                "#
+            }
+            "downloads" => {
+                // Sort by most downloads first
+                r#"
+                SELECT
+                    c.id,
+                    c.name,
+                    c.repo_url,
+                    c.description,
+                    c.download_count,
+                    c.created_at,
+                    c.updated_at,
+                    (SELECT COUNT(*) FROM analysis_results ar
+                     JOIN versions v ON ar.version_id = v.id
+                     WHERE v.crate_id = c.id) as finding_count,
+                    (SELECT MAX(ar.severity) FROM analysis_results ar
+                     JOIN versions v ON ar.version_id = v.id
+                     WHERE v.crate_id = c.id) as max_severity
+                FROM crates c
+                ORDER BY c.download_count DESC, c.updated_at DESC
+                LIMIT ? OFFSET ?
+                "#
+            }
+            _ => {
+                // Default: sort by updated_at DESC
+                r#"
+                SELECT
+                    c.id,
+                    c.name,
+                    c.repo_url,
+                    c.description,
+                    c.download_count,
+                    c.created_at,
+                    c.updated_at,
+                    (SELECT COUNT(*) FROM analysis_results ar
+                     JOIN versions v ON ar.version_id = v.id
+                     WHERE v.crate_id = c.id) as finding_count,
+                    (SELECT MAX(ar.severity) FROM analysis_results ar
+                     JOIN versions v ON ar.version_id = v.id
+                     WHERE v.crate_id = c.id) as max_severity
+                FROM crates c
+                ORDER BY c.updated_at DESC
+                LIMIT ? OFFSET ?
+                "#
+            }
+        };
+
+        let crates = sqlx::query_as::<_, crate::models::CrateWithStats>(query)
+            .bind(per_page as i32)
+            .bind(offset as i32)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(crates)
+    }
+
+    /// Search crates by name with pagination
+    ///
+    /// Returns crates whose names contain the search term (case-insensitive).
+    /// Results are paginated and sorted by relevance (exact matches first).
+    ///
+    /// # Arguments
+    /// * `search_term` - The search string to match against crate names
+    /// * `page` - The page number (1-indexed)
+    /// * `per_page` - Number of items per page
+    pub async fn search_crates_paginated(
+        &self,
+        search_term: &str,
+        page: u32,
+        per_page: u32,
+    ) -> Result<Vec<crate::models::CrateWithStats>, sqlx::Error> {
+        let offset = (page.saturating_sub(1)) * per_page;
+        let search_pattern = format!("%{}%", search_term);
+        let crates = sqlx::query_as::<_, crate::models::CrateWithStats>(
+            r#"
+            SELECT
+                c.id,
+                c.name,
+                c.repo_url,
+                c.description,
+                c.download_count,
+                c.created_at,
+                c.updated_at,
+                (SELECT COUNT(*) FROM analysis_results ar
+                 JOIN versions v ON ar.version_id = v.id
+                 WHERE v.crate_id = c.id) as finding_count,
+                (SELECT MAX(ar.severity) FROM analysis_results ar
+                 JOIN versions v ON ar.version_id = v.id
+                 WHERE v.crate_id = c.id) as max_severity
+            FROM crates c
+            WHERE c.name LIKE ?
+            ORDER BY
+                CASE WHEN c.name = ? THEN 0
+                     WHEN c.name LIKE ? THEN 1
+                     ELSE 2 END,
+                c.name ASC
+            LIMIT ? OFFSET ?
+            "#,
+        )
+        .bind(&search_pattern)
+        .bind(search_term)
+        .bind(format!("{}%", search_term))
+        .bind(per_page as i32)
+        .bind(offset as i32)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(crates)
+    }
+
+    /// Count crates matching a search term
+    ///
+    /// Returns the total number of crates whose names contain the search term.
+    ///
+    /// # Arguments
+    /// * `search_term` - The search string to match against crate names
+    pub async fn count_crates_search(&self, search_term: &str) -> Result<i64, sqlx::Error> {
+        let search_pattern = format!("%{}%", search_term);
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM crates WHERE name LIKE ?")
+            .bind(&search_pattern)
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count.0)
+    }
+
     /// Get dashboard statistics
     pub async fn get_dashboard_stats(&self) -> Result<crate::models::DashboardStats, sqlx::Error> {
         let total_crates: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM crates")
@@ -535,6 +737,185 @@ impl Database {
         .await?;
 
         Ok(versions)
+    }
+
+    // ==================== Queue Management ====================
+
+    /// Add a crate to the crawler queue
+    ///
+    /// If the crate/version combination already exists in the queue, updates the priority.
+    /// Returns the queue item ID.
+    #[instrument(skip(self))]
+    pub async fn add_to_queue(
+        &self,
+        crate_name: &str,
+        version: &str,
+        priority: i32,
+    ) -> Result<i64, sqlx::Error> {
+        // Use INSERT OR REPLACE to handle upserts
+        let existing: Option<(i64,)> =
+            sqlx::query_as("SELECT id FROM crawler_queue WHERE crate_name = ? AND version = ?")
+                .bind(crate_name)
+                .bind(version)
+                .fetch_optional(&self.pool)
+                .await?;
+
+        let queue_id = if let Some((id,)) = existing {
+            // Update existing queue item's priority
+            sqlx::query(
+                r#"
+                UPDATE crawler_queue
+                SET priority = ?,
+                    status = 'pending'
+                WHERE id = ?
+                "#,
+            )
+            .bind(priority)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+
+            info!(
+                "Updated queue item for '{}' v{} (id: {})",
+                crate_name, version, id
+            );
+            id
+        } else {
+            // Insert new queue item
+            let result = sqlx::query(
+                r#"
+                INSERT INTO crawler_queue (crate_name, version, priority, status)
+                VALUES (?, ?, ?, 'pending')
+                "#,
+            )
+            .bind(crate_name)
+            .bind(version)
+            .bind(priority)
+            .execute(&self.pool)
+            .await?;
+
+            let id = result.last_insert_rowid();
+            info!(
+                "Added '{}' v{} to queue (id: {}, priority: {})",
+                crate_name, version, id, priority
+            );
+            id
+        };
+
+        Ok(queue_id)
+    }
+
+    /// Get all pending items in the queue, ordered by priority
+    pub async fn get_pending_queue_items(
+        &self,
+    ) -> Result<Vec<crate::models::QueueItemRow>, sqlx::Error> {
+        let items = sqlx::query_as::<_, crate::models::QueueItemRow>(
+            r#"
+            SELECT id, crate_name, version, priority, status, added_at, started_at, completed_at
+            FROM crawler_queue
+            WHERE status = 'pending'
+            ORDER BY priority DESC, added_at ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(items)
+    }
+
+    /// Get pending queue items with a limit
+    pub async fn get_pending_queue_items_limited(
+        &self,
+        limit: i32,
+    ) -> Result<Vec<crate::models::QueueItemRow>, sqlx::Error> {
+        let items = sqlx::query_as::<_, crate::models::QueueItemRow>(
+            r#"
+            SELECT id, crate_name, version, priority, status, added_at, started_at, completed_at
+            FROM crawler_queue
+            WHERE status = 'pending'
+            ORDER BY priority DESC, added_at ASC
+            LIMIT ?
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(items)
+    }
+
+    /// Get the count of pending queue items
+    pub async fn get_pending_queue_count(&self) -> Result<i64, sqlx::Error> {
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM crawler_queue WHERE status = 'pending'")
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(count.0)
+    }
+
+    /// Mark a queue item as in-progress
+    pub async fn mark_queue_item_in_progress(&self, id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE crawler_queue
+            SET status = 'in_progress',
+                started_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        info!("Marked queue item {} as in-progress", id);
+        Ok(())
+    }
+
+    /// Mark a queue item as completed
+    pub async fn mark_queue_item_completed(&self, id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE crawler_queue
+            SET status = 'completed',
+                completed_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        info!("Marked queue item {} as completed", id);
+        Ok(())
+    }
+
+    /// Mark a queue item as failed
+    pub async fn mark_queue_item_failed(&self, id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE crawler_queue
+            SET status = 'failed',
+                completed_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            "#,
+        )
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        info!("Marked queue item {} as failed", id);
+        Ok(())
+    }
+
+    /// Clear all pending items from the queue
+    pub async fn clear_pending_queue(&self) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query("DELETE FROM crawler_queue WHERE status = 'pending'")
+            .execute(&self.pool)
+            .await?;
+
+        let count = result.rows_affected();
+        info!("Cleared {} pending queue items", count);
+        Ok(count)
     }
 
     /// Get findings for a version with comparison to previous version

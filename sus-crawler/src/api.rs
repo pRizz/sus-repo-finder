@@ -20,7 +20,7 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
-use crate::templates::{DetailedTemplate, StatusTemplate};
+use crate::templates::{DetailedTemplate, QueueItemDisplay, StatusTemplate};
 use sus_crawler::{CrateDownloader, CratesIoClient, Crawler, CrawlerConfig};
 use sus_detector::Detector;
 
@@ -152,19 +152,44 @@ pub fn create_router(db: Database) -> Router {
         )
         // SSE endpoint for live log streaming
         .route("/api/crawler/logs", get(logs_sse))
+        // Queue management endpoints
+        .route("/api/crawler/queue/add", axum::routing::post(add_to_queue))
+        .route(
+            "/api/crawler/queue/add-bulk",
+            axum::routing::post(add_bulk_to_queue),
+        )
         .with_state(state)
 }
 
 /// Crawler status page (main page)
-async fn index() -> impl IntoResponse {
-    // TODO: Fetch real stats from database when crawler is implemented
+async fn index(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> impl IntoResponse {
+    // Fetch real stats from database
+    let crates_scanned = state.db.get_crate_count().await.unwrap_or(0);
+    let findings_count = state.db.get_findings_count().await.unwrap_or(0);
+    let queue_size = state.db.get_pending_queue_count().await.unwrap_or(0);
+
+    // Fetch pending queue items (limited to 10 for display)
+    let queue_items_rows = state.db.get_pending_queue_items_limited(10).await.unwrap_or_default();
+    let queue_items: Vec<QueueItemDisplay> = queue_items_rows
+        .into_iter()
+        .map(|row| QueueItemDisplay {
+            crate_name: row.crate_name,
+            version: row.version,
+            priority: row.priority,
+        })
+        .collect();
+
     let template = StatusTemplate::new(
-        "idle", 0,    // crates_scanned
-        0,    // findings_count
-        0,    // errors_count
-        0,    // queue_size
-        None, // current_crate
-        0.0,  // progress_percent
+        "idle",
+        crates_scanned,
+        findings_count,
+        0,          // errors_count - TODO: fetch from database
+        queue_size,
+        None,       // current_crate
+        0.0,        // progress_percent
+        queue_items,
     );
 
     HtmlTemplate(template)
@@ -211,10 +236,27 @@ async fn stats() -> impl IntoResponse {
     }))
 }
 
-async fn queue() -> impl IntoResponse {
+async fn queue(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let pending_count = state.db.get_pending_queue_count().await.unwrap_or(0);
+    let items = state.db.get_pending_queue_items_limited(50).await.unwrap_or_default();
+
+    let items_json: Vec<serde_json::Value> = items
+        .iter()
+        .map(|item| json!({
+            "id": item.id,
+            "crate_name": item.crate_name,
+            "version": item.version,
+            "priority": item.priority,
+            "status": item.status,
+            "added_at": item.added_at
+        }))
+        .collect();
+
     Json(json!({
-        "pending": 0,
-        "items": []
+        "pending": pending_count,
+        "items": items_json
     }))
 }
 
@@ -1143,4 +1185,174 @@ async fn test_rate_limit(
         })).collect::<Vec<_>>()
     }))
     .into_response()
+}
+
+/// Request body for adding crates to the queue
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddToQueueRequest {
+    /// Crate name
+    pub crate_name: String,
+    /// Version to queue (use "latest" to fetch the latest version from crates.io)
+    pub version: String,
+    /// Priority level (higher = processed first, default: 0)
+    pub priority: Option<i32>,
+}
+
+/// Add a crate to the processing queue
+/// POST /api/crawler/queue/add
+///
+/// This endpoint adds a crate to the pending queue for processing.
+/// The crate will be processed when the crawler runs.
+///
+/// Request body (JSON):
+/// - crate_name: name of the crate to queue
+/// - version: version to queue (or "latest" to auto-detect)
+/// - priority: optional priority level (higher = processed first)
+///
+/// Returns:
+/// - success: true if added to queue
+/// - queue_id: database ID of the queue item
+/// - crate_name, version, priority: the queued item details
+async fn add_to_queue(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Json(request): axum::extract::Json<AddToQueueRequest>,
+) -> impl IntoResponse {
+    let crate_name = request.crate_name.trim();
+    let mut version = request.version.trim().to_string();
+    let priority = request.priority.unwrap_or(0);
+
+    // If version is "latest", fetch the latest version from crates.io
+    if version.to_lowercase() == "latest" {
+        match state.crates_io_client.get_crate(crate_name).await {
+            Ok(response) => {
+                let metadata: sus_crawler::CrateMetadata = response.into();
+                version = metadata.max_version;
+            }
+            Err(e) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "success": false,
+                        "error": format!("Failed to fetch crate info: {}", e)
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    // Add to queue
+    match state.db.add_to_queue(crate_name, &version, priority).await {
+        Ok(queue_id) => Json(json!({
+            "success": true,
+            "queue_id": queue_id,
+            "crate_name": crate_name,
+            "version": version,
+            "priority": priority,
+            "message": format!("Added '{}' v{} to queue", crate_name, version)
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "success": false,
+                "error": format!("Failed to add to queue: {}", e)
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// Request body for bulk-adding crates to the queue
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddBulkToQueueRequest {
+    /// List of crates to add, each with name and optional version
+    pub crates: Vec<AddToQueueItem>,
+    /// Default priority for all items (can be overridden per item)
+    pub default_priority: Option<i32>,
+}
+
+/// A single item to add to the queue
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddToQueueItem {
+    /// Crate name
+    pub crate_name: String,
+    /// Version (optional, defaults to "latest")
+    pub version: Option<String>,
+    /// Priority (optional, uses request's default_priority if not specified)
+    pub priority: Option<i32>,
+}
+
+/// Add multiple crates to the processing queue
+/// POST /api/crawler/queue/add-bulk
+///
+/// This endpoint adds multiple crates to the pending queue for processing.
+///
+/// Request body (JSON):
+/// - crates: array of {crate_name, version?, priority?}
+/// - default_priority: optional default priority for items without explicit priority
+///
+/// Returns:
+/// - success: true if all items added
+/// - added: number of items added
+/// - items: details of each queued item
+async fn add_bulk_to_queue(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Json(request): axum::extract::Json<AddBulkToQueueRequest>,
+) -> impl IntoResponse {
+    let default_priority = request.default_priority.unwrap_or(0);
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    let mut added_count = 0;
+
+    for item in request.crates {
+        let crate_name = item.crate_name.trim();
+        let mut version = item.version.unwrap_or_else(|| "latest".to_string());
+        let priority = item.priority.unwrap_or(default_priority);
+
+        // If version is "latest", fetch from crates.io
+        if version.to_lowercase() == "latest" {
+            match state.crates_io_client.get_crate(crate_name).await {
+                Ok(response) => {
+                    let metadata: sus_crawler::CrateMetadata = response.into();
+                    version = metadata.max_version;
+                }
+                Err(e) => {
+                    results.push(json!({
+                        "crate_name": crate_name,
+                        "success": false,
+                        "error": format!("Failed to fetch crate: {}", e)
+                    }));
+                    continue;
+                }
+            }
+        }
+
+        // Add to queue
+        match state.db.add_to_queue(crate_name, &version, priority).await {
+            Ok(queue_id) => {
+                added_count += 1;
+                results.push(json!({
+                    "crate_name": crate_name,
+                    "version": version,
+                    "priority": priority,
+                    "queue_id": queue_id,
+                    "success": true
+                }));
+            }
+            Err(e) => {
+                results.push(json!({
+                    "crate_name": crate_name,
+                    "success": false,
+                    "error": format!("Failed to add to queue: {}", e)
+                }));
+            }
+        }
+    }
+
+    Json(json!({
+        "success": true,
+        "added": added_count,
+        "total": results.len(),
+        "items": results
+    }))
 }

@@ -212,3 +212,17 @@ pub struct NewAnalysisResult<'a> {
     pub summary: Option<&'a str>,
     pub details: Option<&'a str>,
 }
+
+/// A queue item row from the database
+/// Note: Uses String for timestamps because SQLite returns TEXT format
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct QueueItemRow {
+    pub id: i64,
+    pub crate_name: String,
+    pub version: String,
+    pub priority: i32,
+    pub status: String,
+    pub added_at: String,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
