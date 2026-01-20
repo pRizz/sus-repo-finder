@@ -2393,3 +2393,109 @@ Verifies that API endpoints return real data from the database, not hardcoded mo
 #### Current Completion Status:
 - Features passing: 36/170 (21.2%)
 - Feature #123 (API endpoints return real data) - PASSING ✅
+[Testing] 2026-01-19 19:19 - Regression test for Feature #7 (System fonts loaded correctly)
+  - Step 1: Loaded dashboard page ✅
+  - Step 2: Verified body text uses system sans-serif ✅
+    - Font stack: -apple-system, system-ui, Segoe UI, Noto Sans, Helvetica, Arial, sans-serif
+  - Step 3: Verified code snippets use monospace font ✅
+    - Font stack: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace
+    - Verified on crate detail page with code element 'use reqwest::blocking::get;'
+  - Screenshot: .playwright-mcp/feature-7-fonts-verified.png
+  - Console errors: favicon 404 only (cosmetic)
+  - All 3 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #7 (System fonts loaded correctly) still passing
+
+## Session: 2026-01-19 (Agent - Feature #135)
+
+### Feature #135: README documents all features
+**Status: PASSING** ✅
+
+#### Feature Description:
+Comprehensive documentation - verify that README.md documents all features including crawler, dashboard, and setup instructions.
+
+#### Verification Steps:
+
+**Step 1: Read README.md** ✅
+- README.md exists at project root (202 lines)
+- Contains comprehensive project documentation
+
+**Step 2: Verify crawler documented** ✅
+The README documents the crawler with:
+- Overview section (line 9): Describes crawler purpose
+- Crawler Features section (lines 39-47): Documents parallel processing, rate limiting, incremental crawling, checkpoint/resume, live status portal with SSE, error tracking
+- Crawler Portal API section (lines 132-140): Documents all 7 API endpoints
+- Quick Start section (lines 97-101): Shows how to start the crawler
+- Architecture diagram (lines 165-189): Shows crawler's relationship to other components
+
+**Step 3: Verify dashboard documented** ✅
+The README documents the dashboard with:
+- Overview section (line 10): Describes dashboard purpose
+- Dashboard Features section (lines 49-55): Documents statistics, search, filters, code snippets, syntax highlighting, version comparison, historical tracking
+- Dashboard API section (lines 124-130): Documents all 6 API endpoints
+- Quick Start section (lines 103-107): Shows how to start the dashboard
+- Architecture diagram (lines 165-189): Shows dashboard's relationship to other components
+
+**Step 4: Verify setup documented** ✅
+The README documents setup with:
+- Prerequisites section (lines 79-82): Rust toolchain, SQLite3, Node.js
+- Quick Start section (lines 84-107): Clone, setup script, start commands
+- Configuration section (lines 109-119): Environment variables table with defaults
+- Development section (lines 142-160): Tests, code quality, release builds
+
+#### Additional Documentation Verified:
+- All 12 pattern detection types documented
+- Severity classification system (High/Medium/Low) explained
+- Project structure with Cargo workspace
+- Technology stack (Rust, Axum, SQLite, htmx, Tailwind)
+- Architecture diagram showing component relationships
+- Contributing and security sections
+
+#### Current Completion Status:
+- Features passing: 37/170 (21.8%)
+- Feature #135 (README documents all features) - PASSING ✅
+
+## Session: 2026-01-19 (Agent - Feature #133)
+
+### Feature #133: Multiple concurrent API requests handled
+**Status: PASSING** ✅
+
+#### Feature Description:
+Server handles parallel requests without errors or race conditions.
+
+#### Verification Steps:
+1. **Step 1: Send 10 simultaneous requests** - PASS ✅
+   - Created test_concurrent.sh script with 10 concurrent curl requests
+   - Ran script: all 10 requests returned HTTP 200
+
+2. **Step 2: Verify all return correctly** - PASS ✅
+   - Browser automation test: sent 10 concurrent fetch requests
+   - All returned HTTP 200 in 4ms total
+   - Browser automation test: sent 60 concurrent fetch requests
+   - All returned HTTP 200 in 15ms total
+
+3. **Step 3: Verify no race conditions** - PASS ✅
+   - Network requests log showed 70+ requests all completed successfully
+   - No errors in browser console (except favicon 404)
+   - All data returned correctly without corruption
+
+#### Test Evidence:
+- Shell test: test_concurrent.sh - 10 concurrent requests, all HTTP 200
+- Browser test: 60 concurrent requests in 15ms, 0 failures
+- Screenshot: .playwright-mcp/feature-133-concurrent-api-requests.png
+- Network log: All /api/stats, /api/crates, /api/findings/* returned 200 OK
+
+#### Endpoints Tested:
+- /api/stats (multiple concurrent)
+- /api/crates (multiple concurrent)
+- /api/crates?limit=5 
+- /api/crates?limit=10
+- /api/findings/recent (multiple concurrent)
+- /api/findings/interesting (multiple concurrent)
+
+#### Commit:
+- 0758cdc: Verify Feature #133: Multiple concurrent API requests handled
+
+#### Current Completion Status:
+- Features passing: 36/170 (21.2%)
+- Feature #133 (Multiple concurrent API requests handled) - PASSING ✅
