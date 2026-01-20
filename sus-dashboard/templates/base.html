@@ -35,30 +35,106 @@
         code, pre {
             font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
         }
+        /* Loading overlay styles */
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(13, 17, 23, 0.85);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            backdrop-filter: blur(2px);
+        }
+        #loading-overlay.active {
+            display: flex;
+        }
+        .loading-spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid #21262d;
+            border-top-color: #58a6ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        .loading-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+        .loading-text {
+            color: #c9d1d9;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        /* Search spinner */
+        .search-spinner {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 16px;
+            height: 16px;
+            border: 2px solid #21262d;
+            border-top-color: #58a6ff;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+        .search-form.loading .search-spinner {
+            display: block;
+        }
+        /* Skeleton loading for content */
+        .skeleton {
+            background: linear-gradient(90deg, #21262d 25%, #30363d 50%, #21262d 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s ease-in-out infinite;
+            border-radius: 4px;
+        }
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
     </style>
 </head>
 <body class="bg-dark-bg text-gray-200 min-h-screen">
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" aria-label="Loading" role="status">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <span class="loading-text">Loading...</span>
+        </div>
+    </div>
+
     <nav class="bg-dark-surface border-b border-dark-border">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-16">
                 <div class="flex items-center">
-                    <a href="/" class="text-xl font-bold text-white hover:text-blue-400 transition-colors">
+                    <a href="/" class="text-xl font-bold text-white hover:text-blue-400 transition-colors" data-loading="true">
                         Sus Repo Finder
                     </a>
                     <div class="ml-10 flex items-baseline space-x-4">
-                        <a href="/" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors">
+                        <a href="/" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors" data-loading="true">
                             Dashboard
                         </a>
-                        <a href="/crates" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors">
+                        <a href="/crates" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors" data-loading="true">
                             Crates
                         </a>
                     </div>
                 </div>
                 <div class="flex items-center">
-                    <div class="relative">
-                        <input type="search" placeholder="Search crates..."
-                               class="bg-dark-bg border border-dark-border rounded-lg px-4 py-2 text-sm text-gray-200 placeholder-gray-400 focus:outline-none focus:border-blue-500 w-64">
-                    </div>
+                    <form action="/crates" method="get" class="search-form relative" id="search-form">
+                        <input type="search" name="search" placeholder="Search crates..."
+                               class="bg-dark-bg border border-dark-border rounded-lg px-4 py-2 pr-10 text-sm text-gray-200 placeholder-gray-400 focus:outline-none focus:border-blue-500 w-64">
+                        <div class="search-spinner"></div>
+                    </form>
                 </div>
             </div>
         </div>
@@ -75,5 +151,88 @@
             </p>
         </div>
     </footer>
+
+    <script>
+        // Loading state management
+        (function() {
+            const loadingOverlay = document.getElementById('loading-overlay');
+            const searchForm = document.getElementById('search-form');
+
+            // Show loading overlay
+            function showLoading() {
+                if (loadingOverlay) {
+                    loadingOverlay.classList.add('active');
+                }
+            }
+
+            // Hide loading overlay
+            function hideLoading() {
+                if (loadingOverlay) {
+                    loadingOverlay.classList.remove('active');
+                }
+            }
+
+            // Show search spinner
+            function showSearchSpinner() {
+                if (searchForm) {
+                    searchForm.classList.add('loading');
+                }
+            }
+
+            // Handle navigation links with data-loading attribute
+            document.querySelectorAll('a[data-loading="true"]').forEach(function(link) {
+                link.addEventListener('click', function(e) {
+                    // Only show loading for same-origin navigation
+                    if (link.href && link.href.startsWith(window.location.origin)) {
+                        showLoading();
+                    }
+                });
+            });
+
+            // Handle all internal links (crate links, pagination, etc.)
+            document.querySelectorAll('a[href^="/"]').forEach(function(link) {
+                link.addEventListener('click', function(e) {
+                    // Don't show loading for same-page anchors
+                    if (!link.href.includes('#')) {
+                        showLoading();
+                    }
+                });
+            });
+
+            // Handle search form submission
+            if (searchForm) {
+                searchForm.addEventListener('submit', function(e) {
+                    showSearchSpinner();
+                    showLoading();
+                });
+            }
+
+            // Handle sort dropdown changes (which trigger page navigation)
+            const sortDropdown = document.getElementById('sort');
+            if (sortDropdown) {
+                sortDropdown.addEventListener('change', function() {
+                    showLoading();
+                });
+            }
+
+            // Handle browser back/forward navigation
+            window.addEventListener('pageshow', function(event) {
+                // Hide loading when page is shown (including from bfcache)
+                hideLoading();
+                if (searchForm) {
+                    searchForm.classList.remove('loading');
+                }
+            });
+
+            // Hide loading on page load (in case of fast loads)
+            window.addEventListener('load', function() {
+                hideLoading();
+            });
+
+            // Expose functions globally for use by other scripts
+            window.showLoading = showLoading;
+            window.hideLoading = hideLoading;
+        })();
+    </script>
 </body>
 </html>
