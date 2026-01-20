@@ -6876,3 +6876,60 @@ Failed crate analysis stored in crawler_errors - verifies that the crawler prope
 - Feature #41 (Crawler errors tracked in database) - PASSING ✅
 [Testing] Feature #42 (Crawler portal status page loads) verified - still passing
 [Testing] Session complete - verified feature #42 (no regression found)
+
+
+## Session: 2026-01-20 (Agent - Feature #141)
+
+### Feature #141: API /api/crates/:name returns crate detail
+**Status: PASSING** ✅
+
+#### Feature Description:
+Single crate endpoint works - verifies that the GET /api/crates/:name endpoint returns crate metadata and version information.
+
+#### Verification Steps Completed:
+
+**Step 1: Create test crate** ✅
+- test-crate-0001 already exists in database
+- ID: 101
+- Description: "A test crate for performance testing (1)"
+- Download count: 9,679,551
+- Repo URL: https://github.com/test/test-crate-0001
+
+**Step 2: GET /api/crates/test-crate-0001** ✅
+- HTTP Status: 200 OK
+- Response is valid JSON
+- Response structure: { crate: {...}, versions: [...] }
+
+**Step 3: Verify crate metadata** ✅
+- All required fields present: id, name, description, repo_url, download_count, finding_count, max_severity
+- Values match database records exactly
+- Tested with multiple crates (test-crate-0001, anyhow) - both work
+
+**Step 4: Verify versions included** ✅
+- Versions array present in response
+- Version count matches database (1 version for test-crate-0001)
+- Version fields present: id, version_number, has_build_rs, is_proc_macro, finding_count, last_analyzed
+
+#### Additional Verifications:
+- 404 response for non-existent crate with proper error message
+- Browser automation test via Playwright
+- Screenshots captured for documentation
+
+#### Test Evidence:
+- Screenshots:
+  - feature-141-api-crate-detail.png - API response for existing crate
+  - feature-141-api-404-response.png - 404 response for non-existent crate
+- Verification scripts:
+  - verify_feature_141.js - Comprehensive API verification (all checks pass)
+  - test_feature_141.js - Database verification
+
+#### Files:
+- sus-dashboard/src/api.rs - api_crate_detail handler (lines 425-476)
+- Implementation already complete - this was verification only
+
+#### Commit:
+- 29ef1a6: Verify Feature #141: API /api/crates/:name returns crate detail
+
+#### Current Completion Status:
+- Features passing: 97/170 (57.1%)
+- Feature #141 (API /api/crates/:name returns crate detail) - PASSING ✅
