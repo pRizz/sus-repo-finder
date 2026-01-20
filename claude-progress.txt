@@ -738,3 +738,41 @@
 - Features passing: 15/170 (8.8%)
 - Feature #9 (init.sh script exists and is executable) - PASSING
 
+[Testing] 2026-01-19 18:24:17 - Regression test for Feature #27 (Crates.io API client fetches crate metadata)
+  - Tested API endpoint GET /api/crawler/test-crate/{name}
+  - Tested with 'serde' crate:
+    - name: 'serde' ✓
+    - versions: ['1.0.228', '1.0.227', ...] (312 versions) ✓
+    - description: 'A generic serialization/deserialization framework' ✓
+    - downloads: 780327940 ✓
+    - repository: 'https://github.com/serde-rs/serde' ✓
+  - Additional test with 'tokio' crate - all fields present and correct
+  - Screenshot saved: .playwright-mcp/regression-feature-27-crawler-portal.png
+  - Only console error: favicon.ico 404 (cosmetic, not functional)
+  - All 4 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #27 (Crates.io API client fetches crate metadata) still passing
+
+## Session: 2026-01-19 (Agent - Feature #10)
+
+### Feature #10: Git repository initialized
+**Status: PASSING**
+
+#### What was done:
+- Verified git repository is properly initialized
+- Confirmed all git commands work correctly
+
+#### Steps verified:
+1. ✅ Verify .git directory exists - Directory exists with all required subdirectories (HEAD, config, objects, refs, hooks, etc.)
+2. ✅ Verify at least one commit exists - 30+ commits exist in repository
+3. ✅ Verify initial files are committed - Repository has main branch with full commit history
+
+#### Test evidence:
+- `git rev-parse --is-inside-work-tree` returns `true`
+- `.git` directory contains: HEAD, config, objects/, refs/, hooks/, logs/, etc.
+- Repository is on `main` branch with remote tracking `origin/main`
+- 30+ commits ahead of origin/main
+
+#### Current Completion Status:
+- Features passing: 16/170 (9.4%)
+- Feature #10 (Git repository initialized) - PASSING
