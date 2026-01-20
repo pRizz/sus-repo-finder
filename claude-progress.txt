@@ -6233,3 +6233,123 @@ The feature was already implemented in the codebase (commit 7911ad4). The implem
 #### Current Completion Status:
 - Features passing: 89/170 (52.4%)
 - Feature #43 (Crawler portal shows current crate) - PASSING
+
+## Session: 2026-01-20 (Testing Agent - Feature #117)
+
+### Feature #117: ARIA labels on icon-only buttons
+**Status: PASSING** ✅ (No regression found)
+
+#### Feature Description:
+Buttons without text have aria-label - verifies accessibility compliance for icon-only interactive elements.
+
+#### Verification Steps:
+
+**Step 1: Find icon-only button (if any)** ✅
+- Searched all application pages:
+  - Dashboard landing page (localhost:3002)
+  - Crates list page (localhost:3002/crates)
+  - Crate detail page (localhost:3002/crates/anyhow)
+  - Crawler status page (localhost:3001)
+  - Crawler detailed view (localhost:3001/detailed)
+- Used JavaScript evaluation to scan all buttons and links
+- Tested both desktop and mobile viewports (375px, 1280px)
+- **Result: No icon-only buttons exist in the application**
+
+**Step 2: Verify aria-label present** ✅ N/A
+- Not applicable - no icon-only buttons found
+
+**Step 3: Verify label is meaningful** ✅ N/A
+- Not applicable - no icon-only buttons found
+
+#### Existing aria-labels found (all meaningful):
+- `aria-label="Loading"` on loading overlay (role="status")
+- `aria-label="Pagination"` on pagination nav element
+- `aria-label="Breadcrumb"` on breadcrumb navigation
+- `aria-label="Search crates"` in template (for search input)
+
+#### Button inventory (all have visible text):
+- "Start Crawler" / "Pause Crawler" buttons - text only
+- "Clear" button - text only
+- "Filters" button - SVG icon + "Filters" text
+- "Previous" / "Next" pagination - SVG icon + text
+- Footer links (crates.io, GitHub) - text + external link SVG icon
+
+#### Test Evidence:
+- Screenshot: feature-117-aria-labels-verification.png
+- Console errors: None (only favicon 404)
+- JavaScript DOM inspection confirmed 0 icon-only buttons
+
+#### Conclusion:
+Feature PASSES - The application follows good accessibility practice by including visible text labels on all interactive elements that have icons. No icon-only buttons exist that would require aria-labels.
+
+[Testing] Feature #117 (ARIA labels on icon-only buttons) verified - still passing
+[Testing] Session complete - verified feature #117 (no regression found)
+
+
+## Session: 2026-01-20 (Agent - Feature #164)
+
+### Feature #164: Rate limit backoff works
+**Status: PASSING** ✅
+
+#### Feature Description:
+429 responses trigger backoff - verifies that the crawler implements exponential backoff when rate limited by crates.io API.
+
+#### Implementation:
+
+**Step 1: Created retry.rs module**
+- Added `RetryConfig` struct with configurable parameters:
+  - `initial_delay_ms`: Initial delay before first retry (default: 1000ms)
+  - `max_delay_ms`: Maximum delay between retries (default: 60000ms)
+  - `max_retries`: Maximum retry attempts (default: 5)
+  - `multiplier`: Exponential multiplier (default: 2.0)
+- Added `RateLimitError` trait to identify 429 errors
+- Added `retry_with_backoff` async function with exponential backoff logic
+- Added `RetryResult<T, E>` enum for retry outcomes
+
+**Step 2: Implemented RateLimitError trait**
+- `CratesIoError` in `crates_io.rs`:
+  - `is_rate_limited()` returns true for `CratesIoError::RateLimited`
+  - `is_transient()` returns true for rate limit and network errors
+- `DownloadError` in `downloader.rs`:
+  - `is_rate_limited()` returns true for `DownloadError::RateLimited`
+  - `is_transient()` returns true for rate limit and network errors
+
+**Step 3: Updated CrawlerConfig**
+- Added `retry_config: RetryConfig` field
+- Added `with_retry_config()` builder method
+
+**Step 4: Updated process_single_crate to use retry logic**
+- API calls to crates.io wrapped with `retry_with_backoff`
+- Downloads wrapped with `retry_with_backoff`
+- Logs retry attempts with delay information
+
+#### Unit Tests (8 tests, all passing):
+1. `test_retry_config_default` - Default config values
+2. `test_delay_for_attempt_exponential` - Exponential delay calculation
+3. `test_delay_for_attempt_capped` - Max delay cap
+4. `test_retry_success_first_attempt` - Success on first try
+5. `test_retry_success_after_rate_limit` - Success after retries
+6. `test_retry_exhausted` - All retries exhausted
+7. `test_retry_non_retryable_error` - Non-retryable errors fail fast
+8. `test_retry_result_into_result` - Result conversion
+
+#### Test Evidence:
+- All 23 sus-crawler tests pass
+- All 8 retry module tests pass
+- Screenshot: feature-164-crawler-portal.png
+
+#### Files Changed:
+- `sus-crawler/src/retry.rs` (new - 373 lines)
+- `sus-crawler/src/lib.rs` (exports retry module)
+- `sus-crawler/src/crawler.rs` (uses retry_with_backoff)
+- `sus-crawler/src/crates_io.rs` (implements RateLimitError)
+- `sus-crawler/src/downloader.rs` (implements RateLimitError)
+- `run_retry_tests.sh` (new - test script)
+- `run_crawler_tests.sh` (new - test script)
+
+#### Commit:
+- 8a95ef6: Implement Feature #164: Rate limit backoff works
+
+#### Current Completion Status:
+- Features passing: 90/170 (52.9%)
+- Feature #164 (Rate limit backoff works) - PASSING ✅
