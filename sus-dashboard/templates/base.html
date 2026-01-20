@@ -104,7 +104,7 @@
         }
     </style>
 </head>
-<body class="bg-dark-bg text-gray-200 min-h-screen">
+<body class="bg-dark-bg text-gray-200 min-h-screen overflow-x-hidden">
     <!-- Loading Overlay -->
     <div id="loading-overlay" aria-label="Loading" role="status">
         <div class="loading-content">
@@ -116,31 +116,40 @@
     <nav class="bg-dark-surface border-b border-dark-border">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex items-center justify-between h-16">
-                <div class="flex items-center">
-                    <a href="/" class="text-xl font-bold text-white hover:text-blue-400 transition-colors" data-loading="true">
+                <div class="flex items-center min-w-0">
+                    <a href="/" class="text-lg sm:text-xl font-bold text-white hover:text-blue-400 transition-colors flex-shrink-0" data-loading="true">
                         Sus Repo Finder
                     </a>
-                    <div class="ml-10 flex items-baseline space-x-4">
-                        <a href="/" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors" data-loading="true">
+                    <div class="hidden sm:flex ml-6 lg:ml-10 items-baseline space-x-2 lg:space-x-4">
+                        <a href="/" class="text-gray-300 hover:text-white px-2 lg:px-3 py-2 rounded-md text-sm font-medium transition-colors" data-loading="true">
                             Dashboard
                         </a>
-                        <a href="/crates" class="text-gray-300 hover:text-white px-3 py-2 rounded-md text-sm font-medium transition-colors" data-loading="true">
+                        <a href="/crates" class="text-gray-300 hover:text-white px-2 lg:px-3 py-2 rounded-md text-sm font-medium transition-colors" data-loading="true">
                             Crates
                         </a>
                     </div>
                 </div>
-                <div class="flex items-center">
+                <div class="flex items-center ml-2 sm:ml-4">
                     <form action="/crates" method="get" class="search-form relative" id="search-form">
-                        <input type="search" name="search" placeholder="Search crates..."
-                               class="bg-dark-bg border border-dark-border rounded-lg px-4 py-2 pr-10 text-sm text-gray-200 placeholder-gray-400 focus:outline-none focus:border-blue-500 w-64">
+                        <input type="search" name="search" placeholder="Search..."
+                               class="bg-dark-bg border border-dark-border rounded-lg px-3 sm:px-4 py-2 pr-8 sm:pr-10 text-sm text-gray-200 placeholder-gray-400 focus:outline-none focus:border-blue-500 w-28 sm:w-48 lg:w-64">
                         <div class="search-spinner"></div>
                     </form>
                 </div>
             </div>
+            <!-- Mobile nav links -->
+            <div class="sm:hidden flex items-center justify-center gap-4 pb-3 -mt-1">
+                <a href="/" class="text-gray-300 hover:text-white px-3 py-1 rounded-md text-sm font-medium transition-colors" data-loading="true">
+                    Dashboard
+                </a>
+                <a href="/crates" class="text-gray-300 hover:text-white px-3 py-1 rounded-md text-sm font-medium transition-colors" data-loading="true">
+                    Crates
+                </a>
+            </div>
         </div>
     </nav>
 
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 overflow-x-hidden">
         {% block content %}{% endblock %}
     </main>
 

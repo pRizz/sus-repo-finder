@@ -5,9 +5,9 @@
 {% block content %}
 <div class="space-y-6">
     <!-- Crate Header -->
-    <div class="bg-dark-surface rounded-lg border border-dark-border p-6">
-        <div class="flex items-start justify-between">
-            <div>
+    <div class="bg-dark-surface rounded-lg border border-dark-border p-6 overflow-hidden">
+        <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+            <div class="min-w-0">
                 <h1 class="text-2xl font-bold text-white">{{ crate_info.name }}</h1>
                 {% match crate_info.description %}
                 {% when Some with (desc) %}
@@ -15,7 +15,7 @@
                 {% when None %}
                 {% endmatch %}
             </div>
-            <div class="flex items-center space-x-4">
+            <div class="flex flex-wrap items-center gap-2">
                 {% if crate_info.finding_count > 0 %}
                 <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-900/30 text-red-300 border border-red-700/50">
                     {{ crate_info.finding_count }} finding{{ crate_info.finding_count|pluralize }}
@@ -47,11 +47,11 @@
                 <span class="text-gray-400">Downloads</span>
                 <p class="text-gray-200 font-medium">{{ crate_info.download_count|format_downloads }}</p>
             </div>
-            <div>
+            <div class="min-w-0">
                 <span class="text-gray-400">Repository</span>
                 {% match crate_info.repo_url %}
                 {% when Some with (repo) %}
-                <p><a href="{{ repo }}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300 transition-colors">{{ repo }}</a></p>
+                <p class="truncate"><a href="{{ repo }}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300 transition-colors">{{ repo }}</a></p>
                 {% when None %}
                 <p class="text-gray-400">No repository linked</p>
                 {% endmatch %}
@@ -108,9 +108,9 @@
         {% else %}
         <div class="divide-y divide-dark-border">
             {% for finding in findings %}
-            <div class="p-6 hover:bg-dark-bg/50 transition-colors {% if finding.status == FindingStatus::Removed %}opacity-60 bg-success/5{% endif %}">
-                <div class="flex items-start justify-between">
-                    <div class="flex items-center space-x-3">
+            <div class="p-4 md:p-6 hover:bg-dark-bg/50 transition-colors {% if finding.status == FindingStatus::Removed %}opacity-60 bg-success/5{% endif %}">
+                <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-2 md:gap-4">
+                    <div class="flex flex-wrap items-center gap-2">
                         <!-- Status Badge -->
                         {% if finding.status == FindingStatus::New %}
                         <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-900/30 text-purple-300 border border-purple-700/50">
@@ -144,12 +144,12 @@
                         </span>
                         {% endif %}
                     </div>
-                    <div class="text-right">
-                        <span class="text-sm text-gray-400">{{ finding.file_path }}{% match finding.line_start %}{% when Some with (line) %}:{{ line }}{% when None %}{% endmatch %}</span>
+                    <div class="md:text-right text-sm">
+                        <span class="text-gray-400">{{ finding.file_path }}{% match finding.line_start %}{% when Some with (line) %}:{{ line }}{% when None %}{% endmatch %}</span>
                         {% if finding.status == FindingStatus::Removed %}
                         {% match finding.from_version %}
                         {% when Some with (ver) %}
-                        <div class="text-xs text-success mt-1">Removed since v{{ ver }}</div>
+                        <span class="text-xs text-success ml-2 md:ml-0 md:block md:mt-1">Removed since v{{ ver }}</span>
                         {% when None %}
                         {% endmatch %}
                         {% endif %}
@@ -164,7 +164,7 @@
 
                 <!-- Code Snippet -->
                 {% if finding.code_snippet.is_some() || finding.context_before.is_some() || finding.context_after.is_some() %}
-                <div class="mt-4 rounded-lg bg-dark-bg border {% if finding.status == FindingStatus::Removed %}border-success/30{% else %}border-dark-border{% endif %} overflow-hidden">
+                <div class="mt-4 rounded-lg bg-dark-bg border {% if finding.status == FindingStatus::Removed %}border-success/30{% else %}border-dark-border{% endif %} overflow-hidden max-w-full">
                     <div class="px-4 py-2 bg-dark-border/30 border-b {% if finding.status == FindingStatus::Removed %}border-success/30{% else %}border-dark-border{% endif %} flex items-center justify-between">
                         <span class="text-sm text-gray-400">{{ finding.file_path }}</span>
                         {% match crate_info.repo_url %}

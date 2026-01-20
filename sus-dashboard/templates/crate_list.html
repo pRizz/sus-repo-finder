@@ -24,10 +24,21 @@
             {% endmatch %}
         </div>
         <div class="flex items-center gap-4">
-            <!-- Sort dropdown -->
-            <div class="flex items-center gap-2">
-                <label for="sort" class="text-sm text-gray-400">Sort by:</label>
-                <select id="sort" name="sort" onchange="updateSort(this.value)"
+            <!-- Mobile filter toggle button -->
+            <button id="filter-toggle" type="button" onclick="toggleFilters()"
+                class="md:hidden inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-300 bg-dark-surface border border-dark-border rounded-lg hover:bg-dark-border transition-colors">
+                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                </svg>
+                <span id="filter-toggle-text">Filters</span>
+                <svg id="filter-toggle-icon" class="w-4 h-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            <!-- Desktop sort dropdown (visible on md+) -->
+            <div class="hidden md:flex items-center gap-2">
+                <label for="sort-desktop" class="text-sm text-gray-400">Sort by:</label>
+                <select id="sort-desktop" name="sort" onchange="updateSort(this.value)"
                     class="bg-dark-bg border border-dark-border text-gray-300 text-sm rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
                     <option value="" {% match sort %}{% when None %}selected{% when Some(s) %}{% if s.is_empty() %}selected{% endif %}{% endmatch %}>Last Updated</option>
                     <option value="recent" {% match sort %}{% when Some(s) %}{% if s == "recent" %}selected{% endif %}{% when None %}{% endmatch %}>Recently Analyzed</option>
@@ -35,10 +46,92 @@
                     <option value="downloads" {% match sort %}{% when Some(s) %}{% if s == "downloads" %}selected{% endif %}{% when None %}{% endmatch %}>Most Downloads</option>
                 </select>
             </div>
-            <p class="text-gray-400">{{ total_crates }} crate{{ total_crates|pluralize }} {% match search %}{% when Some(_) %}found{% when None %}scanned{% endmatch %}</p>
+            <p class="text-gray-400 hidden sm:block">{{ total_crates }} crate{{ total_crates|pluralize }} {% match search %}{% when Some(_) %}found{% when None %}scanned{% endmatch %}</p>
         </div>
     </div>
+
+    <!-- Collapsible filter sidebar (hidden on mobile by default, always visible on desktop) -->
+    <div id="filter-sidebar" class="hidden md:block bg-dark-surface rounded-lg border border-dark-border p-4">
+        <div class="flex flex-wrap items-center gap-4">
+            <!-- Sort dropdown (visible in collapsed filter bar on mobile) -->
+            <div class="flex items-center gap-2 md:hidden">
+                <label for="sort-mobile" class="text-sm text-gray-400">Sort:</label>
+                <select id="sort-mobile" name="sort" onchange="updateSort(this.value)"
+                    class="bg-dark-bg border border-dark-border text-gray-300 text-sm rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                    <option value="" {% match sort %}{% when None %}selected{% when Some(s) %}{% if s.is_empty() %}selected{% endif %}{% endmatch %}>Last Updated</option>
+                    <option value="recent" {% match sort %}{% when Some(s) %}{% if s == "recent" %}selected{% endif %}{% when None %}{% endmatch %}>Recently Analyzed</option>
+                    <option value="severity" {% match sort %}{% when Some(s) %}{% if s == "severity" %}selected{% endif %}{% when None %}{% endmatch %}>Highest Severity</option>
+                    <option value="downloads" {% match sort %}{% when Some(s) %}{% if s == "downloads" %}selected{% endif %}{% when None %}{% endmatch %}>Most Downloads</option>
+                </select>
+            </div>
+
+            <!-- Severity filter -->
+            <div class="flex items-center gap-2">
+                <label for="severity-filter" class="text-sm text-gray-400">Severity:</label>
+                <select id="severity-filter" name="severity" onchange="updateFilter('severity', this.value)"
+                    class="bg-dark-bg border border-dark-border text-gray-300 text-sm rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">All</option>
+                    <option value="high">High</option>
+                    <option value="medium">Medium</option>
+                    <option value="low">Low</option>
+                    <option value="none">No Findings</option>
+                </select>
+            </div>
+
+            <!-- Issue type filter -->
+            <div class="flex items-center gap-2">
+                <label for="issue-filter" class="text-sm text-gray-400">Issue Type:</label>
+                <select id="issue-filter" name="issue_type" onchange="updateFilter('issue_type', this.value)"
+                    class="bg-dark-bg border border-dark-border text-gray-300 text-sm rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">All Types</option>
+                    <option value="network">Network</option>
+                    <option value="file_access">File Access</option>
+                    <option value="shell_command">Shell Command</option>
+                    <option value="process_spawn">Process Spawn</option>
+                    <option value="env_access">Env Access</option>
+                    <option value="unsafe_block">Unsafe Block</option>
+                </select>
+            </div>
+
+            <!-- Downloads range filter -->
+            <div class="flex items-center gap-2">
+                <label for="downloads-filter" class="text-sm text-gray-400">Downloads:</label>
+                <select id="downloads-filter" name="downloads" onchange="updateFilter('downloads', this.value)"
+                    class="bg-dark-bg border border-dark-border text-gray-300 text-sm rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                    <option value="">Any</option>
+                    <option value="1m+">1M+</option>
+                    <option value="100k+">100K+</option>
+                    <option value="10k+">10K+</option>
+                    <option value="1k+">1K+</option>
+                </select>
+            </div>
+
+            <!-- Clear filters button -->
+            <a href="/crates" class="text-sm text-blue-400 hover:text-blue-300 transition-colors">
+                Clear all
+            </a>
+        </div>
+    </div>
+
     <script>
+        // Track filter panel state
+        let filtersOpen = false;
+
+        function toggleFilters() {
+            const sidebar = document.getElementById('filter-sidebar');
+            const toggleIcon = document.getElementById('filter-toggle-icon');
+
+            filtersOpen = !filtersOpen;
+
+            if (filtersOpen) {
+                sidebar.classList.remove('hidden');
+                toggleIcon.classList.add('rotate-180');
+            } else {
+                sidebar.classList.add('hidden');
+                toggleIcon.classList.remove('rotate-180');
+            }
+        }
+
         function updateSort(sortValue) {
             const url = new URL(window.location.href);
             if (sortValue) {
@@ -47,6 +140,18 @@
                 url.searchParams.delete('sort');
             }
             // Reset to page 1 when changing sort
+            url.searchParams.set('page', '1');
+            window.location.href = url.toString();
+        }
+
+        function updateFilter(filterName, filterValue) {
+            const url = new URL(window.location.href);
+            if (filterValue) {
+                url.searchParams.set(filterName, filterValue);
+            } else {
+                url.searchParams.delete(filterName);
+            }
+            // Reset to page 1 when changing filters
             url.searchParams.set('page', '1');
             window.location.href = url.toString();
         }
