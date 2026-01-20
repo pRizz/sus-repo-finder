@@ -13,7 +13,9 @@ use serde_json::json;
 use std::sync::Arc;
 use sus_core::Database;
 
-use crate::templates::{CrateDetailTemplate, CrateListTemplate, LandingTemplate, NotFoundTemplate};
+use crate::templates::{
+    CrateDetailTemplate, CrateListTemplate, LandingTemplate, NotFoundTemplate, PageNumber,
+};
 
 /// Application state shared across handlers
 pub struct AppState {
@@ -95,16 +97,73 @@ async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     }
 }
 
-async fn crate_list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match state.db.get_crates().await {
-        Ok(crates) => {
-            let total_crates = crates.len() as i64;
-            HtmlTemplate(CrateListTemplate {
-                crates,
-                total_crates,
-            })
-            .into_response()
+/// Query parameters for crate list page
+#[derive(Debug, Deserialize)]
+pub struct CrateListPageQuery {
+    pub page: Option<u32>,
+    pub per_page: Option<u32>,
+}
+
+async fn crate_list(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<CrateListPageQuery>,
+) -> impl IntoResponse {
+    let page = query.page.unwrap_or(1).max(1);
+    let per_page = query.per_page.unwrap_or(10).clamp(1, 100);
+
+    // Get total count for pagination
+    let total_crates = match state.db.get_crate_count().await {
+        Ok(count) => count,
+        Err(err) => {
+            tracing::error!("Database error getting count: {}", err);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Database error: {}", err),
+            )
+                .into_response();
         }
+    };
+
+    // Calculate total pages
+    let total_pages = (total_crates as u32).div_ceil(per_page);
+    let total_pages = total_pages.max(1);
+
+    // Ensure page is within bounds
+    let page = page.min(total_pages);
+
+    // Pre-compute pagination values
+    let showing_start = (page - 1) * per_page + 1;
+    let showing_end = (page * per_page).min(total_crates as u32);
+    let has_prev = page > 1;
+    let has_next = page < total_pages;
+    let prev_page = if has_prev { page - 1 } else { 1 };
+    let next_page = if has_next { page + 1 } else { total_pages };
+
+    // Generate page numbers for pagination UI
+    let page_numbers: Vec<PageNumber> = (1..=total_pages)
+        .map(|n| PageNumber {
+            number: n,
+            is_current: n == page,
+        })
+        .collect();
+
+    // Get paginated crates
+    match state.db.get_crates_paginated(page, per_page).await {
+        Ok(crates) => HtmlTemplate(CrateListTemplate {
+            crates,
+            total_crates,
+            page,
+            per_page,
+            total_pages,
+            showing_start,
+            showing_end,
+            prev_page,
+            next_page,
+            has_prev,
+            has_next,
+            page_numbers,
+        })
+        .into_response(),
         Err(err) => {
             tracing::error!("Database error: {}", err);
             (
@@ -215,6 +274,7 @@ async fn stats(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
 /// Query parameters for crate list API
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct CrateListQuery {
     pub page: Option<u32>,
     pub per_page: Option<u32>,

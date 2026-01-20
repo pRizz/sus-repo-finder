@@ -3,19 +3,29 @@
 //! This module provides the main Crawler struct that orchestrates
 //! fetching crate metadata from crates.io, downloading sources,
 //! and storing the results in the database.
+//!
+//! ## Rate Limiting
+//!
+//! The crawler implements rate limiting to be a polite citizen when
+//! accessing the crates.io API. Configure the delay between requests
+//! using `CrawlerConfig::rate_limit_delay_ms`.
 
-use anyhow::Result;
 use futures::stream::{self, StreamExt};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use sus_core::Database;
-use tokio::sync::Semaphore;
-use tracing::{error, info, instrument, warn};
+use tokio::sync::{Mutex, Semaphore};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::crates_io::{CrateMetadata, CratesIoClient};
 use crate::downloader::CrateDownloader;
 
 /// Default maximum concurrent crate processing
 const DEFAULT_MAX_CONCURRENT: usize = 10;
+
+/// Default rate limit delay in milliseconds (1 second = 1000ms)
+/// This ensures we don't overwhelm the crates.io API
+const DEFAULT_RATE_LIMIT_DELAY_MS: u64 = 1000;
 
 /// Result of processing a single crate
 #[derive(Debug)]
@@ -39,13 +49,60 @@ pub struct CrateProcessResult {
 pub struct CrawlerConfig {
     /// Maximum number of concurrent crate downloads/processing
     pub max_concurrent: usize,
+    /// Delay between API requests in milliseconds (rate limiting)
+    /// This helps be a polite citizen when accessing crates.io
+    pub rate_limit_delay_ms: u64,
 }
 
 impl Default for CrawlerConfig {
     fn default() -> Self {
         Self {
             max_concurrent: DEFAULT_MAX_CONCURRENT,
+            rate_limit_delay_ms: DEFAULT_RATE_LIMIT_DELAY_MS,
         }
+    }
+}
+
+impl CrawlerConfig {
+    /// Create a new config with custom settings
+    pub fn new(max_concurrent: usize, rate_limit_delay_ms: u64) -> Self {
+        Self {
+            max_concurrent,
+            rate_limit_delay_ms,
+        }
+    }
+
+    /// Set the rate limit delay (builder pattern)
+    pub fn with_rate_limit_delay_ms(mut self, delay_ms: u64) -> Self {
+        self.rate_limit_delay_ms = delay_ms;
+        self
+    }
+}
+
+/// Tracks the last request time for rate limiting
+struct RateLimiter {
+    last_request: Instant,
+    delay: Duration,
+}
+
+impl RateLimiter {
+    fn new(delay_ms: u64) -> Self {
+        Self {
+            // Initialize to past so first request can proceed immediately
+            last_request: Instant::now() - Duration::from_secs(10),
+            delay: Duration::from_millis(delay_ms),
+        }
+    }
+
+    /// Wait if necessary to respect the rate limit, then record the request time
+    async fn wait_and_record(&mut self) {
+        let elapsed = self.last_request.elapsed();
+        if elapsed < self.delay {
+            let wait_time = self.delay - elapsed;
+            debug!("Rate limiting: waiting {:?} before next request", wait_time);
+            tokio::time::sleep(wait_time).await;
+        }
+        self.last_request = Instant::now();
     }
 }
 
@@ -56,6 +113,8 @@ pub struct Crawler {
     downloader: Arc<CrateDownloader>,
     config: CrawlerConfig,
     semaphore: Arc<Semaphore>,
+    /// Rate limiter for API requests (shared via Mutex for async access)
+    rate_limiter: Arc<Mutex<RateLimiter>>,
 }
 
 impl Crawler {
@@ -66,7 +125,7 @@ impl Crawler {
     /// * `db` - Database connection for storing results
     /// * `crates_io_client` - Client for fetching crate metadata
     /// * `downloader` - Downloader for fetching crate sources
-    /// * `config` - Crawler configuration
+    /// * `config` - Crawler configuration (includes rate limiting settings)
     pub fn new(
         db: Database,
         crates_io_client: CratesIoClient,
@@ -74,12 +133,14 @@ impl Crawler {
         config: CrawlerConfig,
     ) -> Self {
         let semaphore = Arc::new(Semaphore::new(config.max_concurrent));
+        let rate_limiter = Arc::new(Mutex::new(RateLimiter::new(config.rate_limit_delay_ms)));
         Self {
             db: Arc::new(db),
             crates_io_client: Arc::new(crates_io_client),
             downloader: Arc::new(downloader),
             config,
             semaphore,
+            rate_limiter,
         }
     }
 
@@ -92,7 +153,7 @@ impl Crawler {
     /// * `db` - Arc-wrapped database connection
     /// * `crates_io_client` - Arc-wrapped crates.io API client
     /// * `downloader` - Arc-wrapped crate downloader
-    /// * `config` - Crawler configuration
+    /// * `config` - Crawler configuration (includes rate limiting settings)
     pub fn from_arc(
         db: Arc<Database>,
         crates_io_client: Arc<CratesIoClient>,
@@ -100,22 +161,28 @@ impl Crawler {
         config: CrawlerConfig,
     ) -> Self {
         let semaphore = Arc::new(Semaphore::new(config.max_concurrent));
+        let rate_limiter = Arc::new(Mutex::new(RateLimiter::new(config.rate_limit_delay_ms)));
         Self {
             db,
             crates_io_client,
             downloader,
             config,
             semaphore,
+            rate_limiter,
         }
     }
 
-    /// Process multiple crates in parallel
+    /// Process multiple crates in parallel with rate limiting
     ///
     /// This method processes a list of crate names concurrently, respecting
-    /// the configured maximum concurrency limit. Each crate is:
-    /// 1. Fetched from crates.io API for metadata
+    /// the configured maximum concurrency limit and rate limit delays.
+    /// Each crate is:
+    /// 1. Fetched from crates.io API for metadata (with rate limiting)
     /// 2. Downloaded and extracted for analysis
     /// 3. Stored in the database
+    ///
+    /// Rate limiting ensures we don't overwhelm the crates.io API by spacing
+    /// out requests according to the configured delay.
     ///
     /// # Arguments
     ///
@@ -127,9 +194,10 @@ impl Crawler {
     #[instrument(skip(self, crate_names), fields(count = crate_names.len()))]
     pub async fn process_crates(&self, crate_names: Vec<String>) -> Vec<CrateProcessResult> {
         info!(
-            "Starting parallel processing of {} crates with max {} concurrent",
+            "Starting parallel processing of {} crates with max {} concurrent, rate limit {}ms",
             crate_names.len(),
-            self.config.max_concurrent
+            self.config.max_concurrent,
+            self.config.rate_limit_delay_ms
         );
 
         let results: Vec<CrateProcessResult> = stream::iter(crate_names)
@@ -138,10 +206,18 @@ impl Crawler {
                 let client = Arc::clone(&self.crates_io_client);
                 let downloader = Arc::clone(&self.downloader);
                 let semaphore = Arc::clone(&self.semaphore);
+                let rate_limiter = Arc::clone(&self.rate_limiter);
 
                 async move {
                     // Acquire semaphore permit to limit concurrency
                     let _permit = semaphore.acquire().await.expect("Semaphore closed");
+
+                    // Apply rate limiting before making API request
+                    {
+                        let mut limiter = rate_limiter.lock().await;
+                        limiter.wait_and_record().await;
+                    }
+
                     Self::process_single_crate(db, client, downloader, name).await
                 }
             })
@@ -259,6 +335,11 @@ impl Crawler {
     pub fn config(&self) -> &CrawlerConfig {
         &self.config
     }
+
+    /// Get the configured rate limit delay in milliseconds
+    pub fn rate_limit_delay_ms(&self) -> u64 {
+        self.config.rate_limit_delay_ms
+    }
 }
 
 #[cfg(test)]
@@ -269,6 +350,45 @@ mod tests {
     fn test_default_config() {
         let config = CrawlerConfig::default();
         assert_eq!(config.max_concurrent, DEFAULT_MAX_CONCURRENT);
+        assert_eq!(config.rate_limit_delay_ms, DEFAULT_RATE_LIMIT_DELAY_MS);
+    }
+
+    #[test]
+    fn test_custom_config() {
+        let config = CrawlerConfig::new(5, 500);
+        assert_eq!(config.max_concurrent, 5);
+        assert_eq!(config.rate_limit_delay_ms, 500);
+    }
+
+    #[test]
+    fn test_config_builder() {
+        let config = CrawlerConfig::default().with_rate_limit_delay_ms(2000);
+        assert_eq!(config.max_concurrent, DEFAULT_MAX_CONCURRENT);
+        assert_eq!(config.rate_limit_delay_ms, 2000);
+    }
+
+    #[tokio::test]
+    async fn test_rate_limiter_delays() {
+        let mut limiter = RateLimiter::new(100); // 100ms delay
+
+        // First request should be immediate
+        let start = Instant::now();
+        limiter.wait_and_record().await;
+        let first_elapsed = start.elapsed();
+        assert!(
+            first_elapsed < Duration::from_millis(50),
+            "First request should be immediate"
+        );
+
+        // Second request should be delayed by ~100ms
+        let start = Instant::now();
+        limiter.wait_and_record().await;
+        let second_elapsed = start.elapsed();
+        assert!(
+            second_elapsed >= Duration::from_millis(90),
+            "Second request should be delayed by ~100ms, was {:?}",
+            second_elapsed
+        );
     }
 
     #[test]

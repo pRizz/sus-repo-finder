@@ -204,10 +204,7 @@ mod tests {
         // Debug trait
         let _debug = format!("{:?}", severity);
 
-        // Clone trait
-        let _cloned = severity.clone();
-
-        // Copy trait
+        // Copy trait (Severity implements Copy, so clone is redundant)
         let _copied = severity;
 
         // PartialEq trait
@@ -230,8 +227,8 @@ mod tests {
         // Debug trait
         let _debug = format!("{:?}", issue);
 
-        // Clone trait
-        let _cloned = issue.clone();
+        // Copy trait (IssueType implements Copy, so clone is redundant)
+        let _copied = issue;
 
         // PartialEq trait
         assert_eq!(IssueType::Network, IssueType::Network);

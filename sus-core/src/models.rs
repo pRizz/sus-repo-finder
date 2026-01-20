@@ -193,3 +193,22 @@ pub struct FindingWithStatus {
     /// The version this finding is from (useful for removed findings)
     pub from_version: Option<String>,
 }
+
+/// Input struct for creating a new analysis result
+///
+/// This struct groups all parameters needed to insert a new finding,
+/// reducing the number of function arguments.
+#[derive(Debug, Clone)]
+pub struct NewAnalysisResult<'a> {
+    pub version_id: i64,
+    pub issue_type: &'a str,
+    pub severity: &'a str,
+    pub file_path: &'a str,
+    pub line_start: Option<i32>,
+    pub line_end: Option<i32>,
+    pub code_snippet: Option<&'a str>,
+    pub context_before: Option<&'a str>,
+    pub context_after: Option<&'a str>,
+    pub summary: Option<&'a str>,
+    pub details: Option<&'a str>,
+}

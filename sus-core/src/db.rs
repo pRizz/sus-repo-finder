@@ -148,6 +148,48 @@ impl Database {
         Ok(count.0)
     }
 
+    /// Get crates with pagination support
+    ///
+    /// Returns crates ordered by updated_at DESC, with LIMIT and OFFSET for pagination.
+    ///
+    /// # Arguments
+    /// * `page` - The page number (1-indexed)
+    /// * `per_page` - Number of items per page
+    pub async fn get_crates_paginated(
+        &self,
+        page: u32,
+        per_page: u32,
+    ) -> Result<Vec<crate::models::CrateWithStats>, sqlx::Error> {
+        let offset = (page.saturating_sub(1)) * per_page;
+        let crates = sqlx::query_as::<_, crate::models::CrateWithStats>(
+            r#"
+            SELECT
+                c.id,
+                c.name,
+                c.repo_url,
+                c.description,
+                c.download_count,
+                c.created_at,
+                c.updated_at,
+                (SELECT COUNT(*) FROM analysis_results ar
+                 JOIN versions v ON ar.version_id = v.id
+                 WHERE v.crate_id = c.id) as finding_count,
+                (SELECT MAX(ar.severity) FROM analysis_results ar
+                 JOIN versions v ON ar.version_id = v.id
+                 WHERE v.crate_id = c.id) as max_severity
+            FROM crates c
+            ORDER BY c.updated_at DESC
+            LIMIT ? OFFSET ?
+            "#,
+        )
+        .bind(per_page as i32)
+        .bind(offset as i32)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(crates)
+    }
+
     /// Get dashboard statistics
     pub async fn get_dashboard_stats(&self) -> Result<crate::models::DashboardStats, sqlx::Error> {
         let total_crates: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM crates")
@@ -400,20 +442,10 @@ impl Database {
     /// Insert an analysis result (finding) into the database
     ///
     /// Returns the ID of the inserted record.
-    #[instrument(skip(self))]
+    #[instrument(skip(self, input))]
     pub async fn insert_analysis_result(
         &self,
-        version_id: i64,
-        issue_type: &str,
-        severity: &str,
-        file_path: &str,
-        line_start: Option<i32>,
-        line_end: Option<i32>,
-        code_snippet: Option<&str>,
-        context_before: Option<&str>,
-        context_after: Option<&str>,
-        summary: Option<&str>,
-        details: Option<&str>,
+        input: &crate::models::NewAnalysisResult<'_>,
     ) -> Result<i64, sqlx::Error> {
         let result = sqlx::query(
             r#"
@@ -425,24 +457,24 @@ impl Database {
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
-        .bind(version_id)
-        .bind(issue_type)
-        .bind(severity)
-        .bind(file_path)
-        .bind(line_start)
-        .bind(line_end)
-        .bind(code_snippet)
-        .bind(context_before)
-        .bind(context_after)
-        .bind(summary)
-        .bind(details)
+        .bind(input.version_id)
+        .bind(input.issue_type)
+        .bind(input.severity)
+        .bind(input.file_path)
+        .bind(input.line_start)
+        .bind(input.line_end)
+        .bind(input.code_snippet)
+        .bind(input.context_before)
+        .bind(input.context_after)
+        .bind(input.summary)
+        .bind(input.details)
         .execute(&self.pool)
         .await?;
 
         let id = result.last_insert_rowid();
         info!(
             "Inserted analysis result id={} for version_id={} (type: {}, severity: {})",
-            id, version_id, issue_type, severity
+            id, input.version_id, input.issue_type, input.severity
         );
         Ok(id)
     }

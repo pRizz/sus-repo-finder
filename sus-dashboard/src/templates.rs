@@ -67,12 +67,31 @@ pub struct LandingTemplate {
     pub recent_findings: Vec<RecentFinding>,
 }
 
+/// Helper struct for page numbers in pagination
+#[allow(dead_code)]
+pub struct PageNumber {
+    pub number: u32,
+    pub is_current: bool,
+}
+
 /// Crate list page template
 #[derive(Template)]
 #[template(path = "crate_list.html")]
+#[allow(dead_code)]
 pub struct CrateListTemplate {
     pub crates: Vec<CrateWithStats>,
     pub total_crates: i64,
+    pub page: u32,
+    pub per_page: u32,
+    pub total_pages: u32,
+    // Pre-computed pagination values for the template
+    pub showing_start: u32,
+    pub showing_end: u32,
+    pub prev_page: u32,
+    pub next_page: u32,
+    pub has_prev: bool,
+    pub has_next: bool,
+    pub page_numbers: Vec<PageNumber>,
 }
 
 /// Crate detail page template

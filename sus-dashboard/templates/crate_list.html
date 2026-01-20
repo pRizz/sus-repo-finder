@@ -88,6 +88,72 @@
             </tbody>
         </table>
     </div>
+
+    <!-- Pagination -->
+    {% if total_pages > 1 %}
+    <nav class="flex items-center justify-between bg-dark-surface rounded-lg border border-dark-border px-4 py-3" aria-label="Pagination">
+        <div class="hidden sm:block">
+            <p class="text-sm text-gray-400">
+                Showing <span class="font-medium text-white">{{ showing_start }}</span> to
+                <span class="font-medium text-white">{{ showing_end }}</span> of
+                <span class="font-medium text-white">{{ total_crates }}</span> results
+            </p>
+        </div>
+        <div class="flex flex-1 justify-between sm:justify-end gap-2">
+            <!-- Previous button -->
+            {% if has_prev %}
+            <a href="/crates?page={{ prev_page }}&per_page={{ per_page }}"
+               class="relative inline-flex items-center rounded-md bg-dark-bg px-3 py-2 text-sm font-semibold text-gray-300 ring-1 ring-inset ring-dark-border hover:bg-dark-border transition-colors">
+                <svg class="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" />
+                </svg>
+                Previous
+            </a>
+            {% else %}
+            <span class="relative inline-flex items-center rounded-md bg-dark-bg px-3 py-2 text-sm font-semibold text-gray-500 ring-1 ring-inset ring-dark-border cursor-not-allowed">
+                <svg class="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" />
+                </svg>
+                Previous
+            </span>
+            {% endif %}
+
+            <!-- Page numbers -->
+            <div class="hidden md:flex gap-1">
+                {% for pn in page_numbers %}
+                    {% if pn.is_current %}
+                    <span class="relative inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md">
+                        {{ pn.number }}
+                    </span>
+                    {% else %}
+                    <a href="/crates?page={{ pn.number }}&per_page={{ per_page }}"
+                       class="relative inline-flex items-center px-4 py-2 text-sm font-semibold text-gray-300 bg-dark-bg ring-1 ring-inset ring-dark-border hover:bg-dark-border rounded-md transition-colors">
+                        {{ pn.number }}
+                    </a>
+                    {% endif %}
+                {% endfor %}
+            </div>
+
+            <!-- Next button -->
+            {% if has_next %}
+            <a href="/crates?page={{ next_page }}&per_page={{ per_page }}"
+               class="relative inline-flex items-center rounded-md bg-dark-bg px-3 py-2 text-sm font-semibold text-gray-300 ring-1 ring-inset ring-dark-border hover:bg-dark-border transition-colors">
+                Next
+                <svg class="h-5 w-5 ml-1" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
+                </svg>
+            </a>
+            {% else %}
+            <span class="relative inline-flex items-center rounded-md bg-dark-bg px-3 py-2 text-sm font-semibold text-gray-500 ring-1 ring-inset ring-dark-border cursor-not-allowed">
+                Next
+                <svg class="h-5 w-5 ml-1" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
+                </svg>
+            </span>
+            {% endif %}
+        </div>
+    </nav>
+    {% endif %}
     {% endif %}
 </div>
 {% endblock %}

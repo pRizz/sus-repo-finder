@@ -590,22 +590,20 @@ async fn store_finding(
     };
 
     // Step 2: Insert the analysis result
-    let finding_id = match state
-        .db
-        .insert_analysis_result(
-            version_id,
-            &request.issue_type,
-            &request.severity,
-            &request.file_path,
-            request.line_start,
-            request.line_end,
-            request.code_snippet.as_deref(),
-            request.context_before.as_deref(),
-            request.context_after.as_deref(),
-            request.summary.as_deref(),
-            request.details.as_deref(),
-        )
-        .await
+    let input = sus_core::NewAnalysisResult {
+        version_id,
+        issue_type: &request.issue_type,
+        severity: &request.severity,
+        file_path: &request.file_path,
+        line_start: request.line_start,
+        line_end: request.line_end,
+        code_snippet: request.code_snippet.as_deref(),
+        context_before: request.context_before.as_deref(),
+        context_after: request.context_after.as_deref(),
+        summary: request.summary.as_deref(),
+        details: request.details.as_deref(),
+    };
+    let finding_id = match state.db.insert_analysis_result(&input).await
     {
         Ok(id) => id,
         Err(e) => {
@@ -701,6 +699,7 @@ async fn get_findings(
 }
 
 /// Request body for parallel crate processing
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessParallelRequest {
     /// List of crate names to process
@@ -724,6 +723,7 @@ pub struct ProcessParallelRequest {
 /// - successful: number of successful operations
 /// - failed: number of failed operations
 /// - results: detailed results for each crate
+#[allow(dead_code)]
 async fn process_parallel(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
     axum::extract::Json(request): axum::extract::Json<ProcessParallelRequest>,
@@ -731,7 +731,10 @@ async fn process_parallel(
     let max_concurrent = request.max_concurrent.unwrap_or(10);
 
     // Create a Crawler instance with the configured concurrency
-    let config = CrawlerConfig { max_concurrent };
+    let config = CrawlerConfig {
+        max_concurrent,
+        ..Default::default()
+    };
     let crawler = Crawler::from_arc(
         Arc::clone(&state.db),
         Arc::clone(&state.crates_io_client),
@@ -927,4 +930,113 @@ async fn test_detector(
         "findings_count": findings.len(),
         "findings": findings_json
     }))
+}
+
+/// Request body for testing rate limiting
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TestRateLimitRequest {
+    /// List of crate names to fetch (for rate limit testing)
+    pub crate_names: Vec<String>,
+    /// Rate limit delay in milliseconds (default: 1000ms = 1 second)
+    pub rate_limit_delay_ms: Option<u64>,
+}
+
+/// Test rate limiting by processing multiple crates
+/// POST /api/crawler/test-rate-limit
+///
+/// This endpoint demonstrates the rate limiting behavior by fetching
+/// multiple crate metadata with configurable delays between requests.
+///
+/// Request body (JSON):
+/// - crate_names: array of crate names to fetch
+/// - rate_limit_delay_ms: delay between requests in milliseconds (default: 1000)
+///
+/// Returns:
+/// - success: true if all fetches completed
+/// - rate_limit_delay_ms: the configured delay
+/// - total_crates: number of crates fetched
+/// - expected_total_time_ms: minimum expected time based on rate limiting
+/// - actual_total_time_ms: actual time taken
+/// - timestamps: array of timestamps for each request (for verification)
+async fn test_rate_limit(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Json(request): axum::extract::Json<TestRateLimitRequest>,
+) -> impl IntoResponse {
+    use std::time::Instant;
+
+    let rate_limit_delay_ms = request.rate_limit_delay_ms.unwrap_or(1000);
+    let crate_names = request.crate_names;
+
+    if crate_names.is_empty() {
+        return Json(json!({
+            "success": false,
+            "error": "crate_names must not be empty"
+        }))
+        .into_response();
+    }
+
+    // Create a crawler with the specified rate limit
+    let config = CrawlerConfig::new(1, rate_limit_delay_ms); // max_concurrent=1 to ensure sequential
+    let crawler = Crawler::from_arc(
+        Arc::clone(&state.db),
+        Arc::clone(&state.crates_io_client),
+        Arc::clone(&state.crate_downloader),
+        config,
+    );
+
+    // Track timing
+    let start_time = Instant::now();
+    let mut timestamps: Vec<u64> = Vec::new();
+
+    // Process crates one at a time, recording timestamps
+    let mut results = Vec::new();
+    for name in &crate_names {
+        let request_start = Instant::now();
+        timestamps.push(start_time.elapsed().as_millis() as u64);
+
+        // Use the crawler to fetch the crate (includes rate limiting)
+        let crate_results = crawler.process_crates(vec![name.clone()]).await;
+        results.extend(crate_results);
+
+        tracing::debug!("Fetched {} in {:?}", name, request_start.elapsed());
+    }
+
+    let actual_total_time_ms = start_time.elapsed().as_millis() as u64;
+    let expected_min_time_ms = if crate_names.len() > 1 {
+        (crate_names.len() as u64 - 1) * rate_limit_delay_ms
+    } else {
+        0
+    };
+
+    // Calculate intervals between requests
+    let intervals: Vec<u64> = timestamps
+        .windows(2)
+        .map(|w| w[1].saturating_sub(w[0]))
+        .collect();
+
+    // Check if rate limiting is working (intervals should be >= delay)
+    let rate_limiting_respected = intervals
+        .iter()
+        .all(|&interval| interval >= rate_limit_delay_ms.saturating_sub(50)); // Allow 50ms tolerance
+
+    let success_count = results.iter().filter(|r| r.success).count();
+
+    Json(json!({
+        "success": true,
+        "rate_limit_delay_ms": rate_limit_delay_ms,
+        "total_crates": crate_names.len(),
+        "successful_fetches": success_count,
+        "expected_min_time_ms": expected_min_time_ms,
+        "actual_total_time_ms": actual_total_time_ms,
+        "timestamps_ms": timestamps,
+        "intervals_ms": intervals,
+        "rate_limiting_respected": rate_limiting_respected,
+        "crates_processed": results.iter().map(|r| json!({
+            "name": r.name,
+            "version": r.version,
+            "success": r.success,
+            "error": r.error
+        })).collect::<Vec<_>>()
+    }))
+    .into_response()
 }

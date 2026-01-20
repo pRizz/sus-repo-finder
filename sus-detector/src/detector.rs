@@ -684,7 +684,7 @@ impl<'a> Visit<'a> for NetworkCallVisitor<'a> {
                 let line = self.get_line_number(
                     path.segments
                         .first()
-                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                        .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
                 );
                 let pattern = NETWORK_PATTERNS
                     .iter()
@@ -739,7 +739,7 @@ impl<'a> Visit<'a> for NetworkCallVisitor<'a> {
                 node.path
                     .segments
                     .first()
-                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                    .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
             );
             let pattern = NETWORK_PATTERNS
                 .iter()
@@ -867,7 +867,7 @@ impl<'a> Visit<'a> for FileAccessVisitor<'a> {
                 let line = self.get_line_number(
                     path.segments
                         .first()
-                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                        .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
                 );
                 let pattern = FILE_ACCESS_PATTERNS
                     .iter()
@@ -924,7 +924,7 @@ impl<'a> Visit<'a> for FileAccessVisitor<'a> {
                 node.path
                     .segments
                     .first()
-                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                    .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
             );
             let pattern = FILE_ACCESS_PATTERNS
                 .iter()
@@ -1056,7 +1056,7 @@ impl<'a> Visit<'a> for ShellCommandVisitor<'a> {
                 let line = self.get_line_number(
                     path.segments
                         .first()
-                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                        .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
                 );
 
                 // Check if the argument is a shell name
@@ -1086,7 +1086,7 @@ impl<'a> Visit<'a> for ShellCommandVisitor<'a> {
                 let line = self.get_line_number(
                     path.segments
                         .first()
-                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                        .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
                 );
                 let pattern = SHELL_COMMAND_PATTERNS
                     .iter()
@@ -1121,21 +1121,19 @@ impl<'a> Visit<'a> for ShellCommandVisitor<'a> {
         if command_methods.contains(&method_name.as_str()) {
             // For .arg() calls, check if the argument is suspicious
             if method_name == "arg" || method_name == "args" {
-                if let Some(first_arg) = node.args.first() {
-                    if let Expr::Lit(expr_lit) = first_arg {
-                        if let Some(arg_value) = Self::extract_string_literal(&expr_lit.lit) {
-                            // Check for suspicious shell arguments like "-c"
-                            if SUSPICIOUS_SHELL_ARGS.contains(&arg_value.as_str()) {
-                                let line = self.get_line_number(node.method.span());
-                                self.create_finding(
-                                    line,
-                                    &arg_value,
-                                    &format!(
-                                        "Suspicious shell argument detected: .{}(\"{}\")",
-                                        method_name, arg_value
-                                    ),
-                                );
-                            }
+                if let Some(Expr::Lit(expr_lit)) = node.args.first() {
+                    if let Some(arg_value) = Self::extract_string_literal(&expr_lit.lit) {
+                        // Check for suspicious shell arguments like "-c"
+                        if SUSPICIOUS_SHELL_ARGS.contains(&arg_value.as_str()) {
+                            let line = self.get_line_number(node.method.span());
+                            self.create_finding(
+                                line,
+                                &arg_value,
+                                &format!(
+                                    "Suspicious shell argument detected: .{}(\"{}\")",
+                                    method_name, arg_value
+                                ),
+                            );
                         }
                     }
                 }
@@ -1169,7 +1167,7 @@ impl<'a> Visit<'a> for ShellCommandVisitor<'a> {
                 node.path
                     .segments
                     .first()
-                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                    .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
             );
             let pattern = SHELL_COMMAND_PATTERNS
                 .iter()
@@ -1279,7 +1277,7 @@ impl<'a> Visit<'a> for ProcessSpawnVisitor<'a> {
                 let line = self.get_line_number(
                     path.segments
                         .first()
-                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                        .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
                 );
                 let pattern = PROCESS_SPAWN_PATTERNS
                     .iter()
@@ -1319,7 +1317,7 @@ impl<'a> Visit<'a> for ProcessSpawnVisitor<'a> {
                 node.path
                     .segments
                     .first()
-                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                    .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
             );
             let pattern = PROCESS_SPAWN_PATTERNS
                 .iter()
@@ -1465,7 +1463,7 @@ impl<'a> Visit<'a> for EnvAccessVisitor<'a> {
                 let line = self.get_line_number(
                     path.segments
                         .first()
-                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                        .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
                 );
 
                 // Check if accessing a sensitive env var
@@ -1565,7 +1563,7 @@ impl<'a> Visit<'a> for EnvAccessVisitor<'a> {
                 node.path
                     .segments
                     .first()
-                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                    .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
             );
             let pattern = ENV_ACCESS_PATTERNS
                 .iter()
@@ -1673,7 +1671,7 @@ impl<'a> Visit<'a> for DynamicLibVisitor<'a> {
                 let line = self.get_line_number(
                     path.segments
                         .first()
-                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                        .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
                 );
                 let pattern = DYNAMIC_LIB_PATTERNS
                     .iter()
@@ -1750,7 +1748,7 @@ impl<'a> Visit<'a> for DynamicLibVisitor<'a> {
                 node.path
                     .segments
                     .first()
-                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                    .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
             );
             let pattern = DYNAMIC_LIB_PATTERNS
                 .iter()
@@ -2037,7 +2035,7 @@ impl<'a> Visit<'a> for UnsafeBlockVisitor<'a> {
     fn visit_item_fn(&mut self, node: &'a syn::ItemFn) {
         if node.sig.unsafety.is_some() {
             let start_line = self.get_line_number(node.sig.fn_token.span);
-            let end_line = if let Some(block) = node.block.stmts.last() {
+            let end_line = if let Some(_block) = node.block.stmts.last() {
                 // Get the end of the last statement
                 self.source
                     .lines()
@@ -2100,13 +2098,10 @@ impl<'a> SensitivePathVisitor<'a> {
     /// Check if a string contains a sensitive path pattern
     fn contains_sensitive_path(s: &str) -> Option<&'static str> {
         let s_lower = s.to_lowercase();
-        for pattern in SENSITIVE_PATHS {
-            // Check for the pattern as a path component or substring
-            if s_lower.contains(&pattern.to_lowercase()) {
-                return Some(pattern);
-            }
-        }
-        None
+        SENSITIVE_PATHS
+            .iter()
+            .find(|pattern| s_lower.contains(&pattern.to_lowercase()))
+            .copied()
     }
 
     /// Check if a string contains home directory expansion patterns
@@ -2213,9 +2208,9 @@ impl<'a> Visit<'a> for SensitivePathVisitor<'a> {
                 for arg in &node.args {
                     if let Expr::Lit(ExprLit { lit, .. }) = arg {
                         if let Some(arg_str) = Self::extract_string_literal(lit) {
-                            if let Some(pattern) = Self::contains_sensitive_path(&arg_str) {
+                            if let Some(_pattern) = Self::contains_sensitive_path(&arg_str) {
                                 let line = self.get_line_number(path.segments.first().map_or_else(
-                                    || proc_macro2::Span::call_site(),
+                                    proc_macro2::Span::call_site,
                                     |s| s.ident.span(),
                                 ));
                                 self.create_finding(
@@ -2238,10 +2233,10 @@ impl<'a> Visit<'a> for SensitivePathVisitor<'a> {
                 || path_str.contains("BaseDirs")
                 || path_str.contains("UserDirs")
             {
-                let line = self.get_line_number(
+                let _line = self.get_line_number(
                     path.segments
                         .first()
-                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                        .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
                 );
                 // This is just home directory access, not necessarily sensitive
                 // We flag it with lower priority - it becomes concerning when combined with sensitive paths
@@ -2302,7 +2297,7 @@ impl<'a> Visit<'a> for SensitivePathVisitor<'a> {
                     node.path
                         .segments
                         .first()
-                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                        .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
                 );
                 self.create_finding(
                     line,
@@ -2381,6 +2376,7 @@ const OBFUSCATION_METHODS: &[&str] = &[
 ];
 
 /// Patterns for literal strings that look like encoded data
+#[allow(dead_code)]
 const ENCODED_STRING_PATTERNS: &[&str] = &[
     // Base64 alphabet characters (long runs suggest encoding)
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
@@ -2523,7 +2519,7 @@ impl<'a> ObfuscationVisitor<'a> {
         // Base64 strings are typically multiples of 4 and contain only valid characters
         let base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
         let valid_chars = s.chars().all(|c| base64_chars.contains(c));
-        let reasonable_length = s.len() >= 24 && s.len() % 4 == 0;
+        let reasonable_length = s.len() >= 24 && s.len().is_multiple_of(4);
         valid_chars && reasonable_length
     }
 
@@ -2535,7 +2531,7 @@ impl<'a> ObfuscationVisitor<'a> {
         // Hex strings are even length and contain only hex characters
         let hex_chars = "0123456789abcdefABCDEF";
         let valid_chars = s.chars().all(|c| hex_chars.contains(c));
-        let even_length = s.len() % 2 == 0;
+        let even_length = s.len().is_multiple_of(2);
         valid_chars && even_length && s.len() >= 32
     }
 
@@ -2633,7 +2629,7 @@ impl<'a> Visit<'a> for ObfuscationVisitor<'a> {
                 let line = self.get_line_number(
                     path.segments
                         .first()
-                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                        .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
                 );
                 let pattern = OBFUSCATION_PATTERNS
                     .iter()
@@ -2755,7 +2751,7 @@ impl<'a> Visit<'a> for ObfuscationVisitor<'a> {
                 node.path
                     .segments
                     .first()
-                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                    .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
             );
             let pattern = OBFUSCATION_PATTERNS
                 .iter()
@@ -2871,7 +2867,7 @@ impl<'a> Visit<'a> for BuildDownloadVisitor<'a> {
                 let line = self.get_line_number(
                     path.segments
                         .first()
-                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                        .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
                 );
                 let pattern = BUILD_DOWNLOAD_PATTERNS
                     .iter()
@@ -2940,7 +2936,7 @@ impl<'a> Visit<'a> for BuildDownloadVisitor<'a> {
                 node.path
                     .segments
                     .first()
-                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                    .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
             );
             let pattern = BUILD_DOWNLOAD_PATTERNS
                 .iter()
@@ -5943,7 +5939,7 @@ fn main() {
 
         // Should detect tar import and unpack method
         assert!(
-            download_findings.len() >= 1,
+            !download_findings.is_empty(),
             "Should detect archive operations"
         );
     }
