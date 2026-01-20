@@ -429,3 +429,45 @@
 #### Current Completion Status:
 - Features passing: 9/170 (5.3%)
 - Feature #8 (README exists with project overview) - PASSING
+
+## Session: 2026-01-20 (Agent - Feature #42)
+
+### Feature #42: Crawler portal status page loads
+**Status: PASSING**
+
+#### What was done:
+- Created askama templates for crawler portal (base.html, status.html)
+- Added StatusTemplate struct with all necessary fields for crawler stats
+- Updated api.rs to render HTML status page using askama
+- Status page displays stats: crates scanned, findings, errors, queue size
+- Added navigation bar with links to Status, Detailed, Errors pages
+- Added status indicator showing crawler state (idle/running/paused)
+- Added "Start Crawler" button and quick links
+- Dark theme styling with Tailwind CSS
+
+#### Files created/modified:
+- `sus-crawler/askama.toml` - askama configuration
+- `sus-crawler/templates/base.html` - base layout template with nav and footer
+- `sus-crawler/templates/status.html` - status page template
+- `sus-crawler/src/templates.rs` - StatusTemplate struct with constructor
+- `sus-crawler/src/api.rs` - updated index handler to render template
+
+#### Steps verified:
+1. ✅ Navigate to crawler portal root (http://localhost:3001/) - Page loads
+2. ✅ Verify HTTP 200 response - Confirmed
+3. ✅ Verify HTML content returned - Full HTML page with status info
+4. ✅ Verify status information displayed:
+   - Page title: "Status - Crawler Portal"
+   - Status indicator showing "Idle"
+   - Stats cards: Crates Scanned, Total Findings, Errors, Queue Size
+   - Current Progress section
+   - Quick links to Detailed View and Error Tracking
+
+#### Test evidence:
+- Screenshot saved: .playwright-mcp/feature-42-status-page.png
+- Browser automation verified page elements
+- No console errors detected
+
+#### Current Completion Status:
+- Features passing: 10/170 (5.9%)
+- Feature #42 (Crawler portal status page loads) - PASSING
