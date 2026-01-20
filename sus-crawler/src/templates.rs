@@ -1,6 +1,18 @@
 //! HTML templates for the crawler portal
 
 use askama::Template;
+use serde::{Deserialize, Serialize};
+
+/// A simplified queue item for display in templates
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueItemDisplay {
+    /// Crate name
+    pub crate_name: String,
+    /// Version
+    pub version: String,
+    /// Priority level
+    pub priority: i32,
+}
 
 /// Crawler status page template
 #[derive(Template)]
@@ -26,6 +38,12 @@ pub struct StatusTemplate {
     pub progress_percent: f64,
     /// Formatted progress display (e.g., "45.5")
     pub progress_display: String,
+    /// List of pending queue items for display
+    pub queue_items: Vec<QueueItemDisplay>,
+    /// Number of items being shown (for display)
+    pub queue_items_shown: i64,
+    /// Whether there are more queue items than displayed
+    pub has_more_queue_items: bool,
 }
 
 impl StatusTemplate {
@@ -38,6 +56,7 @@ impl StatusTemplate {
         queue_size: i64,
         current_crate: Option<&str>,
         progress_percent: f64,
+        queue_items: Vec<QueueItemDisplay>,
     ) -> Self {
         // Capitalize status for display
         let status_display = {
@@ -47,6 +66,9 @@ impl StatusTemplate {
                 Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
             }
         };
+
+        let queue_items_shown = queue_items.len() as i64;
+        let has_more_queue_items = queue_size > queue_items_shown;
 
         Self {
             status: status.to_string(),
@@ -59,6 +81,9 @@ impl StatusTemplate {
             current_crate_name: current_crate.unwrap_or("").to_string(),
             progress_percent,
             progress_display: format!("{:.1}", progress_percent),
+            queue_items,
+            queue_items_shown,
+            has_more_queue_items,
         }
     }
 }

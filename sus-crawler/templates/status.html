@@ -122,6 +122,63 @@
         {% endif %}
     </div>
 
+    <!-- Pending Queue Section -->
+    <div class="bg-dark-surface border border-dark-border rounded-lg p-6">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-white">Pending Queue</h2>
+            <span class="text-sm text-gray-400">{{ queue_size }} crate(s) waiting</span>
+        </div>
+        {% if queue_items.len() > 0 %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-gray-400 border-b border-dark-border">
+                        <th class="text-left py-2 px-3 font-medium">#</th>
+                        <th class="text-left py-2 px-3 font-medium">Crate Name</th>
+                        <th class="text-left py-2 px-3 font-medium">Version</th>
+                        <th class="text-left py-2 px-3 font-medium">Priority</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in queue_items %}
+                    <tr class="border-b border-dark-border hover:bg-dark-bg/50 transition-colors">
+                        <td class="py-2 px-3 text-gray-500">{{ loop.index }}</td>
+                        <td class="py-2 px-3 text-white font-mono">{{ item.crate_name }}</td>
+                        <td class="py-2 px-3 text-gray-300 font-mono">{{ item.version }}</td>
+                        <td class="py-2 px-3">
+                            {% if item.priority >= 100 %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-severity-high/20 text-severity-high">
+                                High
+                            </span>
+                            {% else if item.priority >= 50 %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-severity-medium/20 text-severity-medium">
+                                Medium
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-500/20 text-gray-400">
+                                Normal
+                            </span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% if has_more_queue_items %}
+        <p class="text-gray-400 text-sm mt-3">Showing {{ queue_items_shown }} of {{ queue_size }} pending items</p>
+        {% endif %}
+        {% else %}
+        <div class="text-center py-8">
+            <svg class="w-12 h-12 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+            </svg>
+            <p class="text-gray-400">No crates in queue</p>
+            <p class="text-gray-400 text-sm mt-1">Queue crates to start scanning</p>
+        </div>
+        {% endif %}
+    </div>
+
     <!-- Quick Links -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <a href="/detailed" class="bg-dark-surface border border-dark-border rounded-lg p-6 hover:border-accent transition-colors group">

@@ -3717,3 +3717,34 @@ This is the correct behavior - graceful handling with empty results.
 #### Current Completion Status:
 - Features passing: 53/170 (31.2%)
 - Feature #26 (AST parsing handles syntax errors gracefully) - PASSING
+
+## Session: 2026-01-20 (Testing Agent - Regression Fix)
+
+### Regression Found and Fixed: Template Build Failure
+**Original Feature Tested: #137 (Public API functions documented)**
+
+#### Regression Details:
+While testing Feature #137, discovered a build failure caused by invalid Askama template syntax.
+
+**Error Location:** sus-crawler/templates/status.html line 168
+**Error:** queue_size > queue_items.len() as i64
+**Problem:** Askama templates do not support Rust type casts like as i64
+
+#### Fix Applied:
+1. Added two helper fields to StatusTemplate struct in sus-crawler/src/templates.rs:
+   - queue_items_shown: i64 (pre-computed length of queue_items)
+   - has_more_queue_items: bool (pre-computed comparison result)
+
+2. Updated StatusTemplate::new() to compute these values before struct construction
+
+3. Updated template to use pre-computed values instead of invalid cast
+
+#### Files Modified:
+- sus-crawler/src/templates.rs - Added 2 fields to struct, updated constructor
+- sus-crawler/templates/status.html - Fixed line 168 template syntax
+
+#### Verification:
+- Build now passes via ./init.sh
+- Feature #137 still passes (rustdoc comments present on public API)
+
+#### Result: Regression Fixed, Feature #137 Still Passing
