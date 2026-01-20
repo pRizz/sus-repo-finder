@@ -4400,3 +4400,72 @@ Footer section present with info - verify that the dashboard footer displays wit
 #### Current Completion Status:
 - Features passing: 62/170 (36.5%)
 - Feature #92 (Footer displays with links) - PASSING ✅
+[Testing] Session complete - verified Feature #14 (Pattern detector identifies process spawning) still passing
+
+## Session: 2026-01-20 (Testing Agent - Regression Test)
+
+### Feature #42: Crawler portal status page loads
+**Regression Test: PASSED** ✅
+
+#### Verification Steps:
+- Step 1: Navigate to crawler portal root ✅
+- Step 2: Verify HTTP 200 response ✅
+- Step 3: Verify HTML content returned ✅
+- Step 4: Verify status information displayed ✅
+
+#### Results:
+- Page URL: http://localhost:3001/
+- Page Title: Status - Crawler Portal
+- Status stats: 51 crates scanned, 6 findings, 0 errors, 10 queue
+- Navigation: Crawler Portal, Status, Detailed, Errors links all present
+- Console errors: Only favicon.ico 404 (cosmetic)
+
+[Testing] Feature #42 verified - still passing
+[Testing] Feature #74 (Crate detail page loads) verified - still passing
+[Testing] Session complete - verified feature #74
+
+## Session: 2026-01-20 (Agent - Feature #99)
+
+### Feature #99: API returns 404 for non-existent crate
+**Status: PASSING** ✅
+
+#### Feature Description:
+GET /crates/nonexistent returns 404 - verify that requesting a non-existent crate returns the proper HTTP 404 status code with an error message.
+
+#### Verification Steps:
+
+**Step 1: Request /crates/definitely-not-real-crate** ✅
+- Navigated to http://localhost:3006/crates/definitely-not-real-crate
+- Page loaded with styled error response
+
+**Step 2: Verify HTTP 404 returned** ✅
+- Verified with curl: HTTP status code 404 confirmed
+- Both HTML page and API endpoint return 404 status
+
+**Step 3: Verify error message in response** ✅
+- HTML Page shows:
+  - Title: "Crate 'definitely-not-real-crate' Not Found | Sus Repo Finder"
+  - Heading: "Crate Not Found"
+  - Message: "The crate 'definitely-not-real-crate' could not be found in our database. It may not have been scanned yet, or the name may be incorrect."
+  - Search box to find different crate
+  - Links to Homepage and Browse All Crates
+- API Endpoint (/api/crates/definitely-not-real-crate) returns:
+  - {"error":"Crate 'definitely-not-real-crate' not found","message":"The requested crate does not exist in the database"}
+
+#### Implementation Details:
+- HTML page uses styled `ErrorTemplate::crate_not_found()` template
+- Dark theme consistent with rest of application
+- Error page includes helpful navigation options
+- API returns JSON error with descriptive message
+
+#### Test Evidence:
+- Screenshots:
+  - feature-99-styled-404-page.png - Shows styled 404 error page
+- Console errors: favicon 404 only (cosmetic), Tailwind CDN warning (expected in dev)
+
+#### Commit:
+- 6d9fff3: Verify Feature #99: API returns 404 for non-existent crate
+
+#### Current Completion Status:
+- Features passing: 63/170 (37.1%)
+- Feature #99 (API returns 404 for non-existent crate) - PASSING ✅
