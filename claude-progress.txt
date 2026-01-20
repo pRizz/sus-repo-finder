@@ -583,3 +583,60 @@
 #### Current Completion Status:
 - Features passing: 11/170 (6.5%)
 - Feature #6 (Dark theme applied by default) - PASSING
+[Testing] 2026-01-19 18:15:53 - Regression test for Feature #61 (Crate list page loads)
+  - Navigated to http://localhost:3002/crates
+  - HTTP 200 confirmed - page loaded successfully
+  - Page title: 'Crates - Sus Repo Finder'
+  - UI elements verified:
+    - Navigation bar with 'Sus Repo Finder' branding
+    - Dashboard and Crates links present
+    - Search box present
+    - 'Scanned Crates' heading displayed
+    - '0 crates scanned' count shown
+    - Empty state message displayed correctly
+    - Footer present
+  - Screenshot saved: .playwright-mcp/regression-feature-61-crates-list.png
+  - Console: Only Tailwind CDN warning and favicon 404 (cosmetic issues only)
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #61 (Crate list page loads) still passing
+
+## Session: 2026-01-20 (Agent - Feature #32)
+
+### Feature #32: Crawler stores crate metadata in database
+**Status: PASSING**
+
+#### What was done:
+- Added `upsert_crate()` method to Database in sus-core for inserting/updating crates
+- Added `upsert_version()` method to Database for inserting/updating versions
+- Added `get_crate_by_name()` method for retrieving stored crates
+- Created POST `/api/crawler/crawl-and-store/{name}` endpoint that:
+  1. Fetches crate metadata from crates.io API
+  2. Downloads and extracts latest version to detect build.rs and proc-macro
+  3. Stores crate info (name, description, repo_url, download_count) in database
+  4. Stores version info (version_number, has_build_rs, is_proc_macro) in database
+- Created GET `/api/crawler/stored-crate/{name}` endpoint for verification
+
+#### Files created/modified:
+- `sus-core/src/db.rs` - Added upsert_crate(), upsert_version(), get_crate_by_name() methods
+- `sus-crawler/src/api.rs` - Added crawl_and_store and get_stored_crate endpoints
+
+#### Steps verified:
+1. ✅ Crawl a test crate - Crawled `once_cell` via POST /api/crawler/crawl-and-store/once_cell
+2. ✅ Query crates table - GET /api/crawler/stored-crate/once_cell returns stored data
+3. ✅ Verify crate record exists with correct name - `name: "once_cell"` ✓
+4. ✅ Verify repo_url and description stored:
+   - `repo_url: "https://github.com/matklad/once_cell"` ✓
+   - `description: "Single assignment cells and lazy values."` ✓
+5. ✅ Verify download_count stored - `download_count: 677551250` ✓
+
+#### Test evidence:
+- API response from crawl-and-store: crate_id=2, version_id=2, all metadata stored
+- API response from stored-crate: complete crate data retrieved from database
+- Dashboard shows "3 crates scanned" (including once_cell)
+- Crate list page shows once_cell with description and download count
+- Screenshots saved: feature-32-crates-list.png, feature-32-dashboard-stats.png
+- No console errors detected
+
+#### Current Completion Status:
+- Features passing: 12/170 (7.1%)
+- Feature #32 (Crawler stores crate metadata in database) - PASSING
