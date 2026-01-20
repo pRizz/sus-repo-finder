@@ -5297,3 +5297,68 @@ After refresh, all data was identical:
 #### Current Completion Status:
 - Features passing: 76/170 (44.7%)
 - Feature #119 (Data persists after page refresh) - PASSING
+
+## Session: 2026-01-20 (Agent - Feature #117)
+
+### Feature #117: ARIA labels on icon-only buttons
+**Status: PASSING** ✅
+
+#### Feature Description:
+Buttons without text have aria-label - verify that icon-only buttons have proper ARIA labels for accessibility.
+
+#### Verification Steps:
+
+**Step 1: Find icon-only button (if any)** ✅
+- Thoroughly searched all templates in both `sus-dashboard/templates/` and `sus-crawler/templates/`
+- Used Playwright browser automation to evaluate all buttons on every page:
+  - Dashboard landing page (http://localhost:3002/)
+  - Crates list page (http://localhost:3002/crates)
+  - Crate detail page (http://localhost:3002/crates/anyhow)
+  - Crawler status page (http://localhost:3001/)
+  - Crawler detailed page (http://localhost:3001/detailed)
+- Used JavaScript evaluation to check all button elements for:
+  - Text content
+  - SVG icons
+  - aria-label attributes
+  - isIconOnly status (has SVG but no text)
+
+**Result: NO icon-only buttons found in the application**
+
+**Step 2: Verify aria-label present** ✅
+- N/A - No icon-only buttons exist to verify
+
+**Step 3: Verify label is meaningful** ✅
+- N/A - No icon-only buttons exist to verify
+
+#### All Buttons Found:
+1. **"Start Crawler" / "Pause Crawler"** (crawler portal) - has text label ✅
+2. **"Clear"** (crawler detailed page) - has text label ✅
+
+#### All Icon Uses in Application:
+- SVG icons in stat cards - purely decorative, not interactive
+- SVG icons in external links ("crates.io", "GitHub") - accompanied by text
+- SVG icons in "Browse All Crates" link - accompanied by text
+- SVG icons in pagination ("Previous", "Next") - accompanied by text
+- Filter toggle button - has "Filters" text label
+
+#### Existing ARIA Labels (properly used):
+- Loading overlay: `aria-label="Loading" role="status"`
+- Search input: `aria-label="Search crates"`
+- Pagination nav: `aria-label="Pagination"`
+
+#### Test Evidence:
+- Screenshots:
+  - feature-117-crates-mobile-375.png - Mobile crates page
+  - feature-117-crawler-buttons-verified.png - Crawler buttons with text labels
+- Console errors: None (only cosmetic favicon 404 and Tailwind CDN warning)
+
+#### Why This Passes:
+The feature requirement is **SATISFIED** because:
+1. There are NO icon-only buttons in the application
+2. All buttons have visible text labels
+3. Where icons are used with buttons/links, they are accompanied by text labels
+4. Existing ARIA labels are properly used for other elements
+
+#### Current Completion Status:
+- Features passing: 76/170 (44.7%)
+- Feature #117 (ARIA labels on icon-only buttons) - PASSING ✅
