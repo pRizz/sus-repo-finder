@@ -1310,7 +1310,10 @@ impl<'a> Visit<'a> for DynamicLibVisitor<'a> {
             // Also check the context to see if we're dealing with a library
             let receiver_str = match &*node.receiver {
                 Expr::Path(ExprPath { path, .. }) => format_path(path),
-                Expr::Field(field) => field.member.to_string(),
+                Expr::Field(field) => match &field.member {
+                    syn::Member::Named(ident) => ident.to_string(),
+                    syn::Member::Unnamed(index) => index.index.to_string(),
+                },
                 _ => String::new(),
             };
 
@@ -4128,6 +4131,343 @@ use base64;
             finding.line_start, 4,
             "Line number should be 4, got {}",
             finding.line_start
+        );
+    }
+
+    // ========================================================================
+    // Dynamic Library Loading Detection Tests
+    // ========================================================================
+
+    /// Test that libloading import is detected
+    #[test]
+    fn test_detect_libloading_import() {
+        let source = r#"
+use libloading::Library;
+
+fn main() {
+    let lib = Library::new("malicious.so").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let dynamic_lib_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::DynamicLib)
+            .collect();
+
+        assert!(
+            !dynamic_lib_findings.is_empty(),
+            "Should detect libloading import"
+        );
+        assert!(
+            dynamic_lib_findings[0].summary.contains("libloading"),
+            "Summary should mention libloading"
+        );
+    }
+
+    /// Test that dlopen call is detected
+    #[test]
+    fn test_detect_dlopen_call() {
+        let source = r#"
+extern "C" {
+    fn dlopen(filename: *const i8, flags: i32) -> *mut std::ffi::c_void;
+}
+
+fn load() {
+    unsafe {
+        dlopen(b"evil.so\0".as_ptr() as *const i8, 1);
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let dynamic_lib_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::DynamicLib)
+            .collect();
+
+        assert!(
+            !dynamic_lib_findings.is_empty(),
+            "Should detect dlopen call"
+        );
+    }
+
+    /// Test that LoadLibrary (Windows) is detected
+    #[test]
+    fn test_detect_load_library_windows() {
+        let source = r#"
+#[cfg(windows)]
+extern "system" {
+    fn LoadLibraryA(lpFileName: *const i8) -> *mut std::ffi::c_void;
+}
+
+fn load_dll() {
+    unsafe {
+        LoadLibraryA(b"malicious.dll\0".as_ptr() as *const i8);
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let dynamic_lib_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::DynamicLib)
+            .collect();
+
+        assert!(
+            !dynamic_lib_findings.is_empty(),
+            "Should detect LoadLibraryA call"
+        );
+    }
+
+    /// Test that GetProcAddress is detected
+    #[test]
+    fn test_detect_get_proc_address() {
+        let source = r#"
+#[cfg(windows)]
+extern "system" {
+    fn GetProcAddress(hModule: *mut std::ffi::c_void, lpProcName: *const i8) -> *mut std::ffi::c_void;
+}
+
+fn get_fn() {
+    unsafe {
+        GetProcAddress(std::ptr::null_mut(), b"evil_fn\0".as_ptr() as *const i8);
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let dynamic_lib_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::DynamicLib)
+            .collect();
+
+        assert!(
+            !dynamic_lib_findings.is_empty(),
+            "Should detect GetProcAddress call"
+        );
+    }
+
+    /// Test that dynamic library loading has Medium severity (as per spec)
+    #[test]
+    fn test_dynamic_lib_has_medium_severity() {
+        let source = r#"
+use libloading::Library;
+
+fn main() {
+    let lib = Library::new("plugin.so").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let dynamic_lib_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::DynamicLib)
+            .collect();
+
+        assert!(
+            !dynamic_lib_findings.is_empty(),
+            "Should detect dynamic library usage"
+        );
+        assert_eq!(
+            dynamic_lib_findings[0].severity,
+            sus_core::Severity::Medium,
+            "Dynamic library loading should have Medium severity"
+        );
+    }
+
+    /// Test detection of libdl patterns
+    #[test]
+    fn test_detect_libdl() {
+        let source = r#"
+use libc::{dlopen, dlsym, RTLD_LAZY};
+
+fn load_symbol() {
+    unsafe {
+        let handle = dlopen(b"lib.so\0".as_ptr() as *const i8, RTLD_LAZY);
+        let sym = dlsym(handle, b"func\0".as_ptr() as *const i8);
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let dynamic_lib_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::DynamicLib)
+            .collect();
+
+        assert!(
+            !dynamic_lib_findings.is_empty(),
+            "Should detect dlopen/dlsym usage"
+        );
+    }
+
+    /// Test that context is extracted for dynamic lib findings
+    #[test]
+    fn test_dynamic_lib_context_extraction() {
+        let source = r#"// Line 1
+// Line 2
+// Line 3
+use libloading::Library;
+// Line 5
+// Line 6
+// Line 7
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let dynamic_lib_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::DynamicLib)
+            .collect();
+
+        assert!(
+            !dynamic_lib_findings.is_empty(),
+            "Should detect libloading import"
+        );
+        let finding = &dynamic_lib_findings[0];
+
+        // Context should include surrounding lines
+        assert!(
+            !finding.context_before.is_empty() || !finding.context_after.is_empty(),
+            "Should have some context"
+        );
+    }
+
+    /// Test detection of RTLD flags (Linux dynamic linking constants)
+    #[test]
+    fn test_detect_rtld_flags() {
+        let source = r#"
+use libc::RTLD_NOW;
+use libc::RTLD_GLOBAL;
+
+fn main() {
+    let flags = RTLD_NOW | RTLD_GLOBAL;
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let dynamic_lib_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::DynamicLib)
+            .collect();
+
+        assert!(
+            !dynamic_lib_findings.is_empty(),
+            "Should detect RTLD flags"
+        );
+    }
+
+    /// Test detection of Library::new() method call
+    #[test]
+    fn test_detect_library_new_call() {
+        let source = r#"
+fn load_plugin() {
+    let lib = libloading::Library::new("plugin.so").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let dynamic_lib_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::DynamicLib)
+            .collect();
+
+        assert!(
+            !dynamic_lib_findings.is_empty(),
+            "Should detect libloading::Library::new call"
+        );
+    }
+
+    /// Test that line numbers are correct for dynamic lib findings
+    #[test]
+    fn test_dynamic_lib_line_numbers() {
+        let source = r#"
+// Line 2
+// Line 3
+use libloading;
+// Line 5
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let dynamic_lib_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::DynamicLib)
+            .collect();
+
+        assert!(
+            !dynamic_lib_findings.is_empty(),
+            "Should detect libloading import"
+        );
+        let finding = &dynamic_lib_findings[0];
+
+        // Line number should be 4 (1-indexed, where "use libloading;" is)
+        assert_eq!(
+            finding.line_start, 4,
+            "Line number should be 4, got {}",
+            finding.line_start
+        );
+    }
+
+    /// Test detection of dlclose (cleanup function, still suspicious)
+    #[test]
+    fn test_detect_dlclose() {
+        let source = r#"
+extern "C" {
+    fn dlclose(handle: *mut std::ffi::c_void) -> i32;
+}
+
+fn cleanup(handle: *mut std::ffi::c_void) {
+    unsafe { dlclose(handle); }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let dynamic_lib_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::DynamicLib)
+            .collect();
+
+        assert!(
+            !dynamic_lib_findings.is_empty(),
+            "Should detect dlclose call"
+        );
+    }
+
+    /// Test detection of FreeLibrary (Windows cleanup)
+    #[test]
+    fn test_detect_free_library() {
+        let source = r#"
+#[cfg(windows)]
+extern "system" {
+    fn FreeLibrary(hModule: *mut std::ffi::c_void) -> i32;
+}
+
+fn cleanup(handle: *mut std::ffi::c_void) {
+    unsafe { FreeLibrary(handle); }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let dynamic_lib_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::DynamicLib)
+            .collect();
+
+        assert!(
+            !dynamic_lib_findings.is_empty(),
+            "Should detect FreeLibrary call"
         );
     }
 }
