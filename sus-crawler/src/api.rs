@@ -73,19 +73,19 @@ pub fn create_router(db: Database) -> Router {
         .route("/api/crawler/pause", axum::routing::post(pause))
         .route("/api/crawler/resume", axum::routing::post(resume))
         // Test endpoint to fetch crate metadata from crates.io
-        .route("/api/crawler/test-crate/:name", get(test_crate))
+        .route("/api/crawler/test-crate/{name}", get(test_crate))
         // Test endpoint to download and extract a crate
-        .route("/api/crawler/test-download/:name/:version", get(test_download))
+        .route("/api/crawler/test-download/{name}/{version}", get(test_download))
         // Crawl and store endpoint: fetches from crates.io and stores in database
-        .route("/api/crawler/crawl-and-store/:name", axum::routing::post(crawl_and_store))
+        .route("/api/crawler/crawl-and-store/{name}", axum::routing::post(crawl_and_store))
         // Get stored crate endpoint: retrieves a crate from the database
-        .route("/api/crawler/stored-crate/:name", get(get_stored_crate))
+        .route("/api/crawler/stored-crate/{name}", get(get_stored_crate))
         // Store an analysis result (finding) in the database
         .route("/api/crawler/store-finding", axum::routing::post(store_finding))
         // Get all findings for a specific crate version
-        .route("/api/crawler/findings/:crate_name/:version", get(get_findings))
+        .route("/api/crawler/findings/{crate_name}/{version}", get(get_findings))
         // Analyze a crate's build.rs file for suspicious patterns
-        .route("/api/crawler/analyze/:name/:version", get(analyze_crate))
+        .route("/api/crawler/analyze/{name}/{version}", get(analyze_crate))
         // Test the detector on inline code
         .route("/api/crawler/test-detector", axum::routing::post(test_detector))
         .with_state(state)
