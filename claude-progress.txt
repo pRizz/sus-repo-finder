@@ -527,3 +527,59 @@
   - Only console error: favicon.ico 404 (cosmetic, not functional)
   - Feature still PASSING ✅
 [Testing] Session complete - verified Feature #54 (Dashboard landing page loads) still passing
+[Testing] 2026-01-19 18:14:25 - Regression test for Feature #61 (Crate list page loads)
+  - Navigated to http://localhost:3002/crates
+  - HTTP 200 confirmed - page loaded successfully
+  - Page title: 'Crates - Sus Repo Finder'
+  - UI elements verified:
+    - Navigation bar with 'Sus Repo Finder' branding
+    - Dashboard and Crates links present
+    - Search box present
+    - 'Scanned Crates' heading displayed
+    - '0 crates scanned' count shown
+    - Empty state message displayed correctly
+    - Footer present
+  - Screenshot saved: .playwright-mcp/regression-feature-61-crates-page.png
+  - Only console error: favicon.ico 404 (cosmetic, not functional)
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #61 (Crate list page loads) still passing
+[Testing] 2026-01-19 18:14:40 - Regression test for Feature #8 (README exists with project overview)
+  - README.md exists at project root (202 lines, 6620 bytes)
+  - Project name verified: 'Sus Repo Finder' on line 1
+  - Overview section verified: '## Overview' on line 5
+  - Setup instructions verified: '## Quick Start' on line 84 with full instructions
+  - All 4 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #8 (README exists with project overview) still passing
+
+## Session: 2026-01-19 (Agent - Feature #6)
+
+### Feature #6: Dark theme applied by default
+**Status: PASSING**
+
+#### What was done:
+- Verified both dashboard and crawler portal use dark color scheme
+- Confirmed background color matches spec (#0d1117)
+- Confirmed text color is light (readable against dark background)
+- Both applications use consistent theming
+
+#### Steps verified:
+1. ✅ Navigate to dashboard homepage (http://localhost:3002/) - Page loads successfully
+2. ✅ Verify background color is dark (#0d1117 or similar)
+   - Computed: `rgb(13, 17, 23)` = `#0d1117` ✓ Exact match!
+3. ✅ Verify text color is light (#c9d1d9 or similar)
+   - Computed: `rgb(229, 231, 235)` = `#e5e7eb` ✓ Light gray, good readability
+4. ✅ Navigate to crawler portal (http://localhost:3001/) - Page loads successfully
+5. ✅ Verify same dark theme applied
+   - Computed: Same colors as dashboard (`#0d1117` background, `#e5e7eb` text)
+
+#### Test evidence:
+- Screenshots saved:
+  - .playwright-mcp/feature-6-dashboard-dark-theme.png
+  - .playwright-mcp/feature-6-crawler-dark-theme.png
+- Browser automation verified computed styles match spec colors
+- Both applications have consistent dark theme
+
+#### Current Completion Status:
+- Features passing: 11/170 (6.5%)
+- Feature #6 (Dark theme applied by default) - PASSING
