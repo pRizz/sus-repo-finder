@@ -275,22 +275,270 @@ async fn api_crates(
     }
 }
 
-async fn api_crate_detail() -> &'static str {
-    r#"{"error": "Crate not found"}"#
+async fn api_crate_detail(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    match state.db.get_crate_by_name(&name).await {
+        Ok(Some(crate_info)) => {
+            // Get versions for this crate
+            let versions = state
+                .db
+                .get_versions_for_crate(crate_info.id)
+                .await
+                .unwrap_or_default();
+
+            Json(json!({
+                "crate": {
+                    "id": crate_info.id,
+                    "name": crate_info.name,
+                    "description": crate_info.description,
+                    "repo_url": crate_info.repo_url,
+                    "download_count": crate_info.download_count,
+                    "finding_count": crate_info.finding_count,
+                    "max_severity": crate_info.max_severity
+                },
+                "versions": versions.iter().map(|v| json!({
+                    "id": v.id,
+                    "version_number": v.version_number,
+                    "has_build_rs": v.has_build_rs,
+                    "is_proc_macro": v.is_proc_macro,
+                    "finding_count": v.finding_count,
+                    "last_analyzed": v.last_analyzed
+                })).collect::<Vec<_>>()
+            }))
+            .into_response()
+        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": format!("Crate '{}' not found", name),
+                "message": "The requested crate does not exist in the database"
+            })),
+        )
+            .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": format!("Database error: {}", err),
+                "message": "Failed to fetch crate details"
+            })),
+        )
+            .into_response(),
+    }
 }
 
-async fn api_version_detail() -> &'static str {
-    r#"{"error": "Version not found"}"#
+async fn api_version_detail(
+    State(state): State<Arc<AppState>>,
+    Path((name, version)): Path<(String, String)>,
+) -> impl IntoResponse {
+    // First get the crate to get its ID
+    let crate_info = match state.db.get_crate_by_name(&name).await {
+        Ok(Some(info)) => info,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": format!("Crate '{}' not found", name),
+                    "message": "The requested crate does not exist in the database"
+                })),
+            )
+                .into_response();
+        }
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("Database error: {}", err),
+                    "message": "Failed to fetch crate information"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Get all versions for this crate
+    let versions = match state.db.get_versions_for_crate(crate_info.id).await {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("Database error: {}", err),
+                    "message": "Failed to fetch versions"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Find the specific version
+    let version_info = versions.iter().find(|v| v.version_number == version);
+
+    match version_info {
+        Some(ver) => {
+            // Get findings for this version
+            let findings = state
+                .db
+                .get_findings_by_version(ver.id)
+                .await
+                .unwrap_or_default();
+
+            Json(json!({
+                "crate": {
+                    "id": crate_info.id,
+                    "name": crate_info.name
+                },
+                "version": {
+                    "id": ver.id,
+                    "version_number": ver.version_number,
+                    "has_build_rs": ver.has_build_rs,
+                    "is_proc_macro": ver.is_proc_macro,
+                    "finding_count": ver.finding_count,
+                    "last_analyzed": ver.last_analyzed
+                },
+                "findings": findings.iter().map(|f| json!({
+                    "id": f.id,
+                    "issue_type": f.issue_type,
+                    "severity": f.severity,
+                    "file_path": f.file_path,
+                    "line_start": f.line_start,
+                    "line_end": f.line_end,
+                    "code_snippet": f.code_snippet,
+                    "context_before": f.context_before,
+                    "context_after": f.context_after,
+                    "summary": f.summary
+                })).collect::<Vec<_>>(),
+                "findings_count": findings.len()
+            }))
+            .into_response()
+        }
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": format!("Version '{}' not found for crate '{}'", version, name),
+                "message": "The requested version does not exist for this crate"
+            })),
+        )
+            .into_response(),
+    }
 }
 
-async fn api_compare() -> &'static str {
-    r#"{"versions": [], "diff": null}"#
+async fn api_compare(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    // Get the crate
+    let crate_info = match state.db.get_crate_by_name(&name).await {
+        Ok(Some(info)) => info,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": format!("Crate '{}' not found", name),
+                    "message": "The requested crate does not exist in the database"
+                })),
+            )
+                .into_response();
+        }
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("Database error: {}", err),
+                    "message": "Failed to fetch crate information"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Get versions for comparison
+    let versions = match state.db.get_versions_for_crate(crate_info.id).await {
+        Ok(v) => v,
+        Err(err) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("Database error: {}", err),
+                    "message": "Failed to fetch versions for comparison"
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    Json(json!({
+        "crate": {
+            "id": crate_info.id,
+            "name": crate_info.name
+        },
+        "versions": versions.iter().map(|v| json!({
+            "id": v.id,
+            "version_number": v.version_number,
+            "has_build_rs": v.has_build_rs,
+            "is_proc_macro": v.is_proc_macro,
+            "finding_count": v.finding_count
+        })).collect::<Vec<_>>(),
+        "diff": null
+    }))
+    .into_response()
 }
 
-async fn api_recent_findings() -> &'static str {
-    r#"{"findings": []}"#
+async fn api_recent_findings(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.db.get_recent_findings(10).await {
+        Ok(findings) => Json(json!({
+            "findings": findings.iter().map(|f| json!({
+                "id": f.id,
+                "crate_name": f.crate_name,
+                "version": f.version,
+                "issue_type": f.issue_type,
+                "severity": f.severity,
+                "summary": f.summary
+            })).collect::<Vec<_>>(),
+            "count": findings.len()
+        }))
+        .into_response(),
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": format!("Database error: {}", err),
+                "message": "Failed to fetch recent findings"
+            })),
+        )
+            .into_response(),
+    }
 }
 
-async fn api_interesting() -> &'static str {
-    r#"{"most_flagged": null, "most_common_pattern": null}"#
+async fn api_interesting(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    // Try to get interesting stats - these are best-effort, return defaults if unavailable
+    match state.db.get_crates().await {
+        Ok(crates) => {
+            // Find most flagged crate (highest finding_count)
+            let most_flagged = crates
+                .iter()
+                .filter(|c| c.finding_count > 0)
+                .max_by_key(|c| c.finding_count)
+                .map(|c| json!({
+                    "name": c.name,
+                    "finding_count": c.finding_count,
+                    "max_severity": c.max_severity
+                }));
+
+            Json(json!({
+                "most_flagged": most_flagged,
+                "most_common_pattern": null,
+                "total_crates_with_findings": crates.iter().filter(|c| c.finding_count > 0).count()
+            }))
+            .into_response()
+        }
+        Err(err) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": format!("Database error: {}", err),
+                "message": "Failed to fetch interesting facts"
+            })),
+        )
+            .into_response(),
+    }
 }
