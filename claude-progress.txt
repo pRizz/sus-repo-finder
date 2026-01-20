@@ -4529,3 +4529,120 @@ Connection issues handled gracefully - verify that when network failures or API 
 - Features passing: 65/170 (38.2%)
 - Feature #102 (Network failure shows user-friendly error) - PASSING ✅
 
+[Testing] Feature #149 (Clean crate separation) verified - still passing
+
+## Session: 2026-01-20 (Agent - Feature #107)
+
+### Feature #107: Desktop layout correct at 1920px
+**Status: PASSING** ✅
+
+#### Feature Description:
+Full desktop view renders properly - verify that at 1920px viewport width, the layout uses available space and has no horizontal scroll.
+
+#### Verification Steps:
+
+**Step 1: Set viewport to 1920px width** ✅
+- Browser viewport set to 1920x1080
+
+**Step 2: Load dashboard** ✅
+- Dashboard landing page loads correctly at http://localhost:3002/
+- All content visible and well-formatted
+- Stats cards spread across available width
+- Recent findings section properly styled
+
+**Step 3: Verify layout uses available space** ✅
+- Content centered with max-width container
+- Stats cards use 4-column grid layout at desktop width
+- Table columns properly distributed with readable spacing
+- No excessive whitespace or cramped content
+- Pages verified:
+  - Dashboard landing page
+  - Crates list page
+  - Crate detail page
+  - Crawler portal
+
+**Step 4: Verify no horizontal scroll** ✅
+- Dashboard landing: bodyScrollWidth = viewportWidth = 1920, hasHorizontalScroll = false
+- Crates list: bodyScrollWidth = viewportWidth = 1920, hasHorizontalScroll = false
+- Crate detail: bodyScrollWidth = viewportWidth = 1920, hasHorizontalScroll = false
+- Crawler portal: bodyScrollWidth = viewportWidth = 1920, hasHorizontalScroll = false
+
+#### Test Evidence:
+- Screenshots:
+  - feature-107-1920px-desktop-landing.png - Dashboard at 1920px width
+  - feature-107-1920px-crates-list.png - Crates list at 1920px width
+  - feature-107-1920px-crate-detail.png - Crate detail at 1920px width
+  - feature-107-1920px-crawler-portal.png - Crawler portal at 1920px width
+- Console errors: favicon 404 only (cosmetic)
+
+#### Current Completion Status:
+- Features passing: 66/170 (38.8%)
+- Feature #107 (Desktop layout correct at 1920px) - PASSING ✅
+
+## Session: 2026-01-20 (Agent - Feature #103)
+
+### Feature #103: Malformed URL parameters handled
+**Status: PASSING** ✅
+
+#### Feature Description:
+Invalid query params don't crash - verify that malformed URL parameters are handled gracefully.
+
+#### Implementation Summary:
+
+1. **Added GracefulQuery Custom Extractor** (sus-dashboard/src/api.rs)
+   - Wraps Axum's Query extractor
+   - Catches QueryRejection errors during deserialization
+   - Renders styled error page instead of raw error text
+   - Extracts user-friendly error messages from parse errors
+
+2. **Added ErrorTemplate::bad_request()** (sus-dashboard/src/templates.rs)
+   - Creates 400 Bad Request error page
+   - Shows "Invalid URL Parameters" heading
+   - Provides helpful message and navigation links
+
+3. **Updated Handlers to Use GracefulQuery**
+   - crate_list() now uses GracefulQuery<CrateListPageQuery>
+   - crate_detail() now uses GracefulQuery<CrateDetailQuery>
+
+#### Verification Steps:
+
+**Step 1: Navigate with bad params ?severity=invalid** ✅
+- URL: http://localhost:3007/crates?severity=invalid
+- Result: Page loads normally, invalid severity param ignored
+- Screenshot: feature-103-invalid-severity.png
+
+**Step 2: Verify page loads** ✅
+- Page loads with full crate list
+- All navigation and functionality works
+
+**Step 3: Verify params ignored or error shown** ✅
+- Unknown params (severity=invalid): Silently ignored, page works
+- Invalid types (page=abc): Shows styled 400 error page
+- Overflow values (page=99999999999999999999): Shows styled 400 error
+- XSS attempts (version=<script>): Properly escaped, defaults to "Latest"
+
+#### Additional Tests:
+- page=abc → Styled 400 error: "Expected a number but received text"
+- page=0 → Handled gracefully (defaults to page 1)
+- page=99999999999999999999 → Styled 400 error: "One or more parameters have invalid values"
+- version=<script>alert('xss')</script> → Falls back to default version safely
+
+#### Test Evidence:
+- Screenshots:
+  - feature-103-invalid-severity.png - Shows page loads with invalid severity
+  - feature-103-invalid-page-error.png - Raw error before fix (reference)
+  - feature-103-styled-error-page.png - Styled 400 error page
+  - feature-103-overflow-error.png - Overflow number error
+  - feature-103-crate-detail-bad-version.png - Bad version handled
+- Console errors: None (only favicon 404 - cosmetic)
+
+#### Files Modified:
+- sus-dashboard/src/api.rs (+45 lines for GracefulQuery, 2 handler updates)
+- sus-dashboard/src/templates.rs (+14 lines for bad_request method)
+
+#### Commit:
+- 8359fbc: Implement Feature #103: Malformed URL parameters handled gracefully
+
+#### Current Completion Status:
+- Features passing: 65/170 (38.2%)
+- Feature #103 (Malformed URL parameters handled) - PASSING ✅
