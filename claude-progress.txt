@@ -1460,3 +1460,79 @@ AST nodes are accessible for pattern detection analysis.
 #### Current Completion Status:
 - Features passing: 25/170 (14.7%)
 - Feature #25 (AST parsing handles valid Rust syntax) - PASSING
+[Testing] 2026-01-19 18:52:32 - Regression test for Feature #54 (Dashboard landing page loads)
+  - Navigated to http://localhost:3002
+  - HTTP 200 confirmed
+  - Summary stats displayed:
+    - Crates Scanned: 6
+    - Total Findings: 2
+    - High Severity: 0
+    - Medium / Low: 1 / 1
+  - Page title: 'Sus Repo Finder - Dashboard'
+  - Recent Findings section present (2 findings shown)
+  - About section present with pattern types
+  - Dark theme applied correctly
+  - Screenshot: .playwright-mcp/regression-test-feature-54-dashboard-landing.png
+  - Console errors: favicon 404 only (cosmetic)
+  - All 3 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #54 (Dashboard landing page loads) still passing
+
+
+## Session: 2026-01-19 (Agent - Feature #20 Verification)
+
+### Feature #20: Pattern detector identifies obfuscation
+**Status: PASSING**
+
+#### Feature Description:
+Detects base64/hex decoding patterns that could indicate obfuscated malicious code.
+
+#### Verification Results:
+1. **base64 crate import** - DETECTED, HIGH severity
+2. **hex crate import** - DETECTED, HIGH severity
+3. **base64::decode() function call** - DETECTED, HIGH severity
+4. **hex::decode() function call** - DETECTED, HIGH severity
+5. **flate2 (compression) import** - DETECTED, HIGH severity
+6. **aes (encryption) import** - DETECTED, HIGH severity
+
+#### Steps Verified:
+- Step 1: Create test with base64::decode of suspicious string ✅
+  - Created test JSON file with base64 and hex imports/calls
+- Step 2: Run detector ✅
+  - Used POST /api/crawler/test-detector endpoint
+- Step 3: Verify obfuscation pattern detected ✅
+  - 7 findings returned for base64/hex test
+  - 2 findings returned for flate2/aes test
+  - All findings have severity: "high" as required
+
+#### Implementation Summary:
+- ObfuscationVisitor struct walks AST looking for obfuscation patterns
+- Detects imports from obfuscation-related crates (base64, hex, flate2, aes, etc.)
+- Detects function calls to encoding/decoding functions
+- Detects method calls like .decode(), .encode(), .compress(), .decrypt()
+- All obfuscation findings have HIGH severity as per spec
+
+#### Test Evidence:
+- API tested via curl with JSON payloads
+- Screenshot saved: .playwright-mcp/feature-20-obfuscation-detection.png
+- No JavaScript errors in browser console
+
+#### Current Completion Status:
+- Features passing: 25/170 (14.7%)
+- Feature #20 (Pattern detector identifies obfuscation) - PASSING
+
+[Testing] 2026-01-19 18:52:49 - Regression test for Feature #2 (SQLite database initializes with schema)
+  - Verified all 6 required tables exist via API endpoints:
+    1. crates table: /api/crawler/stats returns crates_scanned ✅
+    2. versions table: /api/crawler/stored-crate/{name} queries it ✅
+    3. analysis_results table: /api/crawler/stats returns findings_count ✅
+    4. crawler_state table: /api/crawler/status returns status data ✅
+    5. crawler_errors table: /api/crawler/errors returns {errors: [], total: 0} ✅
+    6. crawler_queue table: /api/crawler/queue returns {items: [], pending: 0} ✅
+  - Schema source: sus-core/migrations/001_initial_schema.sql
+  - Unit test exists: test_database_all_tables_created in sus-core/src/db.rs
+  - Screenshot: .playwright-mcp/regression-test-feature-2-database-schema.png
+  - Console errors: None
+  - All 7 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #2 (SQLite database initializes with schema) still passing
