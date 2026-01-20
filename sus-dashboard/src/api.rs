@@ -14,7 +14,8 @@ use std::sync::Arc;
 use sus_core::Database;
 
 use crate::templates::{
-    CrateDetailTemplate, CrateListTemplate, LandingTemplate, NotFoundTemplate, PageNumber,
+    CrateDetailTemplate, CrateListTemplate, ErrorTemplate, LandingTemplate, NotFoundTemplate,
+    PageNumber,
 };
 
 /// Application state shared across handlers
@@ -75,6 +76,21 @@ where
     }
 }
 
+/// Render a template with a specific status code
+fn render_with_status<T: Template>(status: StatusCode, template: T) -> Response {
+    match template.render() {
+        Ok(html) => (status, Html(html)).into_response(),
+        Err(err) => {
+            tracing::error!("Template error: {}", err);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Template error: {}", err),
+            )
+                .into_response()
+        }
+    }
+}
+
 async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Fetch dashboard stats and recent findings from database
     let stats_result = state.db.get_dashboard_stats().await;
@@ -88,11 +104,7 @@ async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         .into_response(),
         (Err(err), _) | (_, Err(err)) => {
             tracing::error!("Database error loading dashboard: {}", err);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Database error: {}", err),
-            )
-                .into_response()
+            render_with_status(StatusCode::INTERNAL_SERVER_ERROR, ErrorTemplate::server_error())
         }
     }
 }
@@ -102,6 +114,8 @@ async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 pub struct CrateListPageQuery {
     pub page: Option<u32>,
     pub per_page: Option<u32>,
+    pub search: Option<String>,
+    pub sort: Option<String>,
 }
 
 async fn crate_list(
@@ -110,17 +124,25 @@ async fn crate_list(
 ) -> impl IntoResponse {
     let page = query.page.unwrap_or(1).max(1);
     let per_page = query.per_page.unwrap_or(10).clamp(1, 100);
+    let search = query.search.filter(|s| !s.trim().is_empty());
+    let sort = query.sort.clone().unwrap_or_default();
 
-    // Get total count for pagination
-    let total_crates = match state.db.get_crate_count().await {
-        Ok(count) => count,
-        Err(err) => {
-            tracing::error!("Database error getting count: {}", err);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Database error: {}", err),
-            )
-                .into_response();
+    // Get total count for pagination (with search filter if applicable)
+    let total_crates = if let Some(ref search_term) = search {
+        match state.db.count_crates_search(search_term).await {
+            Ok(count) => count,
+            Err(err) => {
+                tracing::error!("Database error getting search count: {}", err);
+                return render_with_status(StatusCode::INTERNAL_SERVER_ERROR, ErrorTemplate::server_error());
+            }
+        }
+    } else {
+        match state.db.get_crate_count().await {
+            Ok(count) => count,
+            Err(err) => {
+                tracing::error!("Database error getting count: {}", err);
+                return render_with_status(StatusCode::INTERNAL_SERVER_ERROR, ErrorTemplate::server_error());
+            }
         }
     };
 
@@ -132,7 +154,7 @@ async fn crate_list(
     let page = page.min(total_pages);
 
     // Pre-compute pagination values
-    let showing_start = (page - 1) * per_page + 1;
+    let showing_start = if total_crates == 0 { 0 } else { (page - 1) * per_page + 1 };
     let showing_end = (page * per_page).min(total_crates as u32);
     let has_prev = page > 1;
     let has_next = page < total_pages;
@@ -147,8 +169,15 @@ async fn crate_list(
         })
         .collect();
 
-    // Get paginated crates
-    match state.db.get_crates_paginated(page, per_page).await {
+    // Get paginated crates (with search filter and sort if applicable)
+    let crates_result = if let Some(ref search_term) = search {
+        state.db.search_crates_paginated(search_term, page, per_page).await
+    } else {
+        // Use sorted query when sort is specified
+        state.db.get_crates_paginated_sorted(page, per_page, &sort).await
+    };
+
+    match crates_result {
         Ok(crates) => HtmlTemplate(CrateListTemplate {
             crates,
             total_crates,
@@ -162,15 +191,13 @@ async fn crate_list(
             has_prev,
             has_next,
             page_numbers,
+            search,
+            sort: query.sort,
         })
         .into_response(),
         Err(err) => {
             tracing::error!("Database error: {}", err);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Database error: {}", err),
-            )
-                .into_response()
+            render_with_status(StatusCode::INTERNAL_SERVER_ERROR, ErrorTemplate::server_error())
         }
     }
 }
@@ -231,16 +258,12 @@ async fn crate_detail(
             .into_response()
         }
         Ok(None) => {
-            // Crate not found
-            (StatusCode::NOT_FOUND, format!("Crate '{}' not found", name)).into_response()
+            // Crate not found - render styled error page
+            render_with_status(StatusCode::NOT_FOUND, ErrorTemplate::crate_not_found(&name))
         }
         Err(err) => {
             tracing::error!("Database error loading crate '{}': {}", name, err);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Database error: {}", err),
-            )
-                .into_response()
+            render_with_status(StatusCode::INTERNAL_SERVER_ERROR, ErrorTemplate::server_error())
         }
     }
 }
