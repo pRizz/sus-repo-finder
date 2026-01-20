@@ -5362,3 +5362,55 @@ The feature requirement is **SATISFIED** because:
 #### Current Completion Status:
 - Features passing: 76/170 (44.7%)
 - Feature #117 (ARIA labels on icon-only buttons) - PASSING ✅
+
+## Session: 2026-01-20 (Agent - Feature #125)
+
+### Feature #125: Browser back button works correctly
+**Status: PASSING** ✅
+
+#### Feature Description:
+Navigation history preserved - verify that the browser back button works correctly throughout the application.
+
+#### Verification Steps:
+
+**Step 1: Navigate from home to crate list** ✅
+- Started at http://localhost:3002/ (Dashboard home)
+- Clicked "Crates" link in navigation
+- Arrived at http://localhost:3002/crates
+
+**Step 2: Click into crate detail** ✅
+- From crates list, clicked on "anyhow" crate link
+- Arrived at http://localhost:3002/crates/anyhow
+- Crate detail page loaded correctly with findings
+
+**Step 3: Press back button** ✅
+- Pressed browser back button (goBack())
+- Successfully navigated back
+
+**Step 4: Verify returns to crate list** ✅
+- URL returned to http://localhost:3002/crates
+- Page content intact (51 crates displayed)
+- Pagination visible and correct
+
+#### Additional Verification:
+- Back button from crate list returns to home ✅
+- Pagination state preserved when navigating back ✅
+  - Navigated to page 2 (?page=2&per_page=10)
+  - Clicked into axum crate detail
+  - Pressed back - returned to page 2 with pagination preserved
+  - URL correctly shows ?page=2&per_page=10 after back navigation
+
+#### Test Evidence:
+- Screenshots:
+  - feature-125-back-to-home.png - Dashboard after navigating back from crates
+  - feature-125-back-preserves-pagination.png - Page 2 of crates after back navigation
+- Console errors: None (only Tailwind CDN warning - cosmetic)
+
+#### Notes:
+- Browser back button functionality works correctly out of the box
+- No code changes required - standard browser behavior
+- URL-based routing ensures state (page, filters) is preserved in history
+
+#### Current Completion Status:
+- Features passing: 77/170 (45.3%)
+- Feature #125 (Browser back button works correctly) - PASSING ✅
