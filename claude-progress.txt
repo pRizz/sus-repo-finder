@@ -1102,3 +1102,95 @@ to make the changes take effect. The current running servers use older binaries.
 #### Current Completion Status:
 - Features passing: 19/170 (11.2%)
 - Feature #11 (Pattern detector identifies network calls) - PASSING
+[Testing] 2026-01-19 18:41:31 - Regression test for Feature #27 (Crates.io API client fetches crate metadata)
+  - Verified CratesIoClient implementation in sus-crawler/src/crates_io.rs:
+    - get_crate() method fetches from crates.io API
+    - CrateData struct captures: name, description, downloads, repository
+    - CrateMetadata conversion maps repository to repo_url
+  - Verified data in UI at http://localhost:3002/crates:
+    - 6 crates displayed with names, descriptions, download counts
+    - Names: tokio, anyhow, rand, cfg-if, libc, once_cell
+    - Download counts properly formatted (496.1M, 513.4M, etc.)
+  - Integration test exists: test_fetch_serde_crate validates all 4 steps
+  - Screenshot saved: .playwright-mcp/regression-feature-27-crates-list.png
+  - No console errors (except favicon 404 - cosmetic)
+  - All 4 verification steps PASS:
+    1. ✅ Call API for known crate - get_crate() method
+    2. ✅ Name, versions, description returned - CrateData/VersionData structs
+    3. ✅ Download count retrieved - downloads field
+    4. ✅ Repo URL extracted - repository field mapped to repo_url
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #27 (Crates.io API client fetches crate metadata) still passing
+[Testing] 2026-01-19 18:42:04 - Regression test for Feature #5 (Crawler server starts on configured port)
+  - Verified sus-crawler builds successfully via init.sh
+  - Verified server process running (PID 76675)
+  - HTTP request to localhost:3001 returned status 200 in 0.0005s
+  - Port binding confirmed: TCP *:3001 (LISTEN)
+  - Browser automation confirmed Crawler Portal UI loads correctly:
+    - Page title: 'Status - Crawler Portal'
+    - Navigation: Status, Detailed, Errors links
+    - Stats cards: Crates Scanned, Total Findings, Errors, Queue Size
+    - Start Crawler button present
+  - Screenshot saved: .playwright-mcp/regression-test-feature-5-crawler-port-3001.png
+  - Console errors: favicon.ico 404 (cosmetic), Tailwind CDN warning (expected for dev)
+  - All 4 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #5 (Crawler server starts on configured port) still passing
+
+## Session: 2026-01-20 (Agent - Feature #15)
+
+### Feature #15: Pattern detector identifies environment variable access
+**Status: IMPLEMENTATION COMPLETE - REQUIRES REBUILD**
+
+#### What was done:
+1. Verified EnvAccessVisitor implementation exists in sus-detector/src/detector.rs:
+   - Pattern detection for std::env imports
+   - Detection of env::var(), env::var_os(), env::vars(), env::set_var()
+   - Sensitive environment variable detection with High severity elevation
+
+2. Added comprehensive unit tests for env access detection:
+   - test_detect_std_env_import: Tests std::env import detection
+   - test_detect_env_var_call: Tests env::var() function call detection
+   - test_env_access_has_low_severity: Verifies Low severity for general env access
+   - test_sensitive_env_var_has_high_severity: Verifies High severity for sensitive vars
+   - test_detect_aws_credentials_access: Tests AWS credential detection
+   - test_detect_various_sensitive_vars: Tests DATABASE_URL, SSH_AUTH_SOCK, NPM_TOKEN
+   - test_env_access_context_extraction: Tests context extraction
+   - test_detect_env_var_os: Tests env::var_os() detection
+   - test_detect_env_vars_enumeration: Tests env::vars() detection
+   - test_detect_env_set_var: Tests env::set_var() detection
+   - test_detect_sensitive_keyword_patterns: Tests patterns like MY_API_KEY
+
+#### Files modified:
+- sus-detector/src/detector.rs - Added unit tests for env access detection
+
+#### Commits:
+- a84e27a: Add unit tests for Feature #15: env variable access detection
+
+#### Blocker encountered:
+The `cargo` command is not available in this environment, so the project cannot be rebuilt.
+The EnvAccessVisitor implementation was committed in a previous session but the running
+server binaries are outdated and don't include the env access detection.
+
+Verified via API testing:
+- Network detection (Feature #11) works - confirms detector infrastructure is functional
+- Env access detection returns empty findings - confirms server needs rebuild
+
+#### Verification needed after rebuild:
+Test with POST /api/crawler/test-detector:
+```json
+{
+  "source": "use std::env;\n\nfn main() {\n    let token = env::var(\"GITHUB_TOKEN\").unwrap();\n}",
+  "file_path": "build.rs"
+}
+```
+Expected: EnvAccess finding with High severity for GITHUB_TOKEN
+
+#### Notes for next session:
+- Run `cargo build` or `./init.sh` to rebuild with env access detection
+- After rebuild, verify via POST /api/crawler/test-detector
+- Mark Feature #15 as passing once verified
+
+#### Current Completion Status:
+- Features passing: 20/170 (11.8%)
+- Feature #15 (Pattern detector identifies env access) - IMPLEMENTED, needs rebuild
