@@ -1318,3 +1318,77 @@ Feature #19 marked as PASSING
   - All 4 verification steps PASS
   - Feature still PASSING ✅
 [Testing] Session complete - verified Feature #12 (Pattern detector identifies file system access) still passing
+
+### Feature #20: Pattern detector identifies obfuscation patterns
+**Status: IN PROGRESS (Code Complete, Needs Build/Test)**
+
+#### Feature Description:
+Detects base64/hex decoding patterns that could indicate obfuscated malicious code:
+- Base64 imports and decoding (base64 crate, STANDARD.decode)
+- Hex imports and decoding (hex crate, FromHex)
+- String literals that look like encoded data
+- Compression libraries (flate2, gzip, zstd)
+- Encryption libraries (aes, chacha)
+- XOR cipher patterns
+
+#### Implementation Complete:
+1. Added ObfuscationVisitor struct to walk AST
+2. Added OBFUSCATION_PATTERNS constant with 35+ patterns to detect
+3. Added OBFUSCATION_METHODS constant for decode/encode method detection
+4. Implemented detection of:
+   - Obfuscation crate imports (base64, hex, flate2, aes, etc.)
+   - Function calls to encoding/decoding functions
+   - Method calls like .decode(), .encode(), .compress(), .decrypt()
+   - String literals that look like base64 (24+ chars, multiple of 4, valid chars)
+   - String literals that look like hex (32+ chars, even length, hex chars only)
+   - High-entropy byte arrays (>128 unique byte values)
+
+5. Severity: HIGH for all obfuscation patterns (as per spec)
+
+6. Added 15 comprehensive unit tests:
+   - test_detect_base64_import
+   - test_detect_hex_import
+   - test_obfuscation_has_high_severity
+   - test_detect_base64_decode_method
+   - test_detect_hex_decode_method
+   - test_detect_base64_string_literal
+   - test_detect_hex_string_literal
+   - test_detect_compression_import
+   - test_detect_encryption_import
+   - test_obfuscation_context_extraction
+   - test_normal_strings_not_flagged
+   - test_detect_bs58_import
+   - test_detect_xor_import
+   - test_obfuscation_line_numbers
+
+#### Changes Made:
+- sus-detector/src/detector.rs: +676 lines
+  - Replaced TODO stub in detect_obfuscation() with full implementation
+  - Added ObfuscationVisitor with Visit trait implementation
+  - Added pattern constants and helper methods
+  - Added comprehensive test suite
+
+#### Commit: 8095c95
+Commit message: "Implement obfuscation detection (Feature #20)"
+
+#### Next Steps Required:
+1. Rebuild project with `cargo build --all-targets`
+2. Run tests with `cargo test --all-features`
+3. Restart crawler server to pick up new binary
+4. Test via browser automation: POST /api/crawler/test-detector with base64/hex code
+5. Verify findings detected with HIGH severity
+6. Mark feature as passing after live verification
+
+#### Current Status:
+- Code implementation: COMPLETE ✅
+- Unit tests added: COMPLETE ✅
+- Committed: COMPLETE ✅
+- Build verification: PENDING (cargo not available)
+- Live API testing: PENDING (requires rebuild and server restart)
+
+Note: The cargo command is not in the allowed command list for this session.
+A subsequent session or manual intervention is needed to:
+1. Run `cargo build --all-targets` to compile
+2. Run `cargo test` to verify unit tests pass
+3. Restart the crawler server
+4. Complete browser-based verification

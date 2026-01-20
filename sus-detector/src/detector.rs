@@ -192,6 +192,49 @@ const ENV_ACCESS_METHODS: &[&str] = &[
     "remove_var",
 ];
 
+/// Dynamic library loading patterns to detect.
+/// These indicate potential code injection or plugin loading in build scripts
+/// which could be used to execute arbitrary code at build time.
+const DYNAMIC_LIB_PATTERNS: &[&str] = &[
+    // Popular Rust FFI library
+    "libloading",
+    "Library",
+    // Standard library dynamic linking
+    "dlopen",
+    "dlsym",
+    "dlclose",
+    "dlerror",
+    // Windows dynamic loading
+    "LoadLibrary",
+    "LoadLibraryA",
+    "LoadLibraryW",
+    "LoadLibraryEx",
+    "GetProcAddress",
+    "FreeLibrary",
+    // libdl bindings
+    "libdl",
+    "dl::open",
+    // Linux-specific
+    "dlopen_sys",
+    "RTLD_LAZY",
+    "RTLD_NOW",
+    "RTLD_GLOBAL",
+    "RTLD_LOCAL",
+];
+
+/// Dynamic library method names that indicate runtime loading
+const DYNAMIC_LIB_METHODS: &[&str] = &[
+    // libloading methods
+    "new",     // Library::new
+    "get",     // library.get::<fn()>
+    "into_raw",
+    "from_raw",
+    // C-style methods
+    "dlopen",
+    "dlsym",
+    "dlclose",
+];
+
 /// The main pattern detector
 pub struct Detector {
     // Configuration options can be added here
