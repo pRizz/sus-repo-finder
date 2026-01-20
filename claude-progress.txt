@@ -1271,3 +1271,50 @@ Feature #17 marked as PASSING
 - Build succeeds without errors
 - Commit: 81a44f2
 
+
+
+### Feature #19: Pattern detector identifies sensitive path access
+**Status: PASSING**
+
+#### Feature Description:
+Detects access to sensitive file paths that could indicate credential theft or privacy violations:
+- ~/.ssh, ~/.aws, ~/.kube, ~/.gnupg
+- /etc/passwd, /etc/shadow
+- .env files, credentials files
+- Browser data, shell history
+
+#### Verification Results:
+1. SSH directory access ("~/.ssh/id_rsa") - DETECTED, HIGH severity
+2. /etc/passwd access - DETECTED, HIGH severity  
+3. AWS credentials ("~/.aws/credentials") - DETECTED, HIGH severity
+4. Kubernetes config ("~/.kube/config") - DETECTED, HIGH severity
+5. Environment files (".env") - DETECTED, HIGH severity
+6. Path.join() with sensitive paths - DETECTED
+
+#### Implementation Details:
+- SensitivePathVisitor walks AST looking for string literals with sensitive paths
+- Detects Path::new(), PathBuf::from(), path.join(), path.push() with sensitive arguments
+- Detects include_str!/include_bytes! macros accessing sensitive files
+- High severity assigned to all sensitive path access patterns
+- Context extraction provides 3 lines before/after for review
+
+#### Tests Performed:
+- Unit tests in sus-detector/src/detector.rs (18 test cases)
+- Browser automation tests via /api/crawler/test-detector endpoint
+- All sensitive paths detected with HIGH severity as expected
+
+Feature #19 marked as PASSING
+[Testing] 2026-01-19 18:47:37 - Regression test for Feature #12 (Pattern detector identifies file system access)
+  - Tested via POST /api/crawler/test-detector endpoint
+  - Test 1: std::fs::read_to_string("/etc/passwd")
+    - file_access patterns detected (std::fs import, fs::read_to_string call)
+    - sensitive_path detected with severity: high
+  - Test 2: Multiple sensitive paths (/etc/shadow, .ssh/id_rsa, /etc/cron.d)
+    - /etc/shadow: high severity ✅
+    - .ssh/id_rsa: high severity ✅
+    - fs::write, fs::read: medium severity ✅
+  - Screenshot saved: .playwright-mcp/regression-test-feature-12-file-access.png
+  - Console errors: favicon 404 only (cosmetic)
+  - All 4 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #12 (Pattern detector identifies file system access) still passing
