@@ -163,6 +163,20 @@ pub fn create_router(db: Database) -> Router {
             "/api/crawler/store-error",
             axum::routing::post(store_error),
         )
+        // Checkpoint system endpoints
+        .route(
+            "/api/crawler/run/create",
+            axum::routing::post(create_crawler_run),
+        )
+        .route(
+            "/api/crawler/run/checkpoint",
+            axum::routing::post(update_checkpoint),
+        )
+        .route(
+            "/api/crawler/run/complete",
+            axum::routing::post(complete_run),
+        )
+        .route("/api/crawler/run/state", get(get_run_state))
         .with_state(state)
 }
 
@@ -190,6 +204,16 @@ async fn index(
         "idle"
     };
 
+    // Calculate progress percentage
+    // Progress = completed / total * 100
+    let total_queue = state.db.get_total_queue_count().await.unwrap_or(0);
+    let completed_queue = state.db.get_completed_queue_count().await.unwrap_or(0);
+    let progress_percent = if total_queue > 0 {
+        (completed_queue as f64 / total_queue as f64) * 100.0
+    } else {
+        0.0
+    };
+
     // Fetch pending queue items (limited to 10 for display)
     let queue_items_rows = state
         .db
@@ -205,14 +229,17 @@ async fn index(
         })
         .collect();
 
+    // Fetch error count
+    let errors_count = state.db.get_crawler_error_count().await.unwrap_or(0);
+
     let template = StatusTemplate::new(
         status,
         crates_scanned,
         findings_count,
-        0, // errors_count - TODO: fetch from database
+        errors_count,
         queue_size,
         current_crate.as_deref(),
-        0.0, // progress_percent
+        progress_percent,
         queue_items,
     );
 
@@ -1527,6 +1554,200 @@ async fn store_error(
             Json(json!({
                 "success": false,
                 "error": format!("Failed to store error: {}", e)
+            })),
+        )
+            .into_response(),
+    }
+}
+
+// =============================================================================
+// Checkpoint System Endpoints
+// =============================================================================
+
+/// Request body for creating a new crawler run
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateRunRequest {
+    /// Unique identifier for this crawler run
+    pub run_id: String,
+    /// Total number of crates to be processed
+    pub crates_total: i32,
+}
+
+/// Create a new crawler run
+/// POST /api/crawler/run/create
+///
+/// This endpoint creates a new crawler run record in the database.
+/// Call this at the start of a crawl session to initialize checkpoint tracking.
+///
+/// Request body (JSON):
+/// - run_id: unique identifier for this run (required)
+/// - crates_total: total crates to process (required)
+///
+/// Returns:
+/// - success: true if run was created
+/// - id: database ID of the created run record
+async fn create_crawler_run(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Json(request): axum::extract::Json<CreateRunRequest>,
+) -> impl IntoResponse {
+    match state
+        .db
+        .create_crawler_run(&request.run_id, request.crates_total)
+        .await
+    {
+        Ok(id) => Json(json!({
+            "success": true,
+            "id": id,
+            "run_id": request.run_id,
+            "crates_total": request.crates_total
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "success": false,
+                "error": format!("Failed to create crawler run: {}", e)
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// Request body for updating checkpoint
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateCheckpointRequest {
+    /// The crawler run identifier
+    pub run_id: String,
+    /// Number of crates processed so far
+    pub crates_processed: i32,
+    /// Current crate being processed (if any)
+    pub current_crate: Option<String>,
+    /// Current position in the queue
+    pub queue_position: i32,
+    /// Number of errors encountered
+    pub errors_count: i32,
+    /// Number of findings discovered
+    pub findings_count: i32,
+}
+
+/// Update checkpoint for an active crawler run
+/// POST /api/crawler/run/checkpoint
+///
+/// This endpoint updates the checkpoint data for a running crawler.
+/// Call this periodically (e.g., after each crate) to persist progress.
+///
+/// Request body (JSON):
+/// - run_id: identifier of the run to update (required)
+/// - crates_processed: number of crates processed so far (required)
+/// - current_crate: name of crate currently being processed (optional)
+/// - queue_position: current position in queue (required)
+/// - errors_count: number of errors encountered (required)
+/// - findings_count: number of findings discovered (required)
+///
+/// Returns:
+/// - success: true if checkpoint was updated
+async fn update_checkpoint(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Json(request): axum::extract::Json<UpdateCheckpointRequest>,
+) -> impl IntoResponse {
+    match state
+        .db
+        .update_crawler_checkpoint(
+            &request.run_id,
+            request.crates_processed,
+            request.current_crate.as_deref(),
+            request.queue_position,
+            request.errors_count,
+            request.findings_count,
+        )
+        .await
+    {
+        Ok(()) => Json(json!({
+            "success": true,
+            "run_id": request.run_id,
+            "checkpoint": {
+                "crates_processed": request.crates_processed,
+                "current_crate": request.current_crate,
+                "queue_position": request.queue_position,
+                "errors_count": request.errors_count,
+                "findings_count": request.findings_count
+            }
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "success": false,
+                "error": format!("Failed to update checkpoint: {}", e)
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// Request body for completing a run
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompleteRunRequest {
+    /// The crawler run identifier
+    pub run_id: String,
+}
+
+/// Mark a crawler run as completed
+/// POST /api/crawler/run/complete
+///
+/// This endpoint marks a crawler run as completed.
+/// Call this when the crawl session finishes successfully.
+///
+/// Request body (JSON):
+/// - run_id: identifier of the run to complete (required)
+///
+/// Returns:
+/// - success: true if run was marked as completed
+async fn complete_run(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Json(request): axum::extract::Json<CompleteRunRequest>,
+) -> impl IntoResponse {
+    match state.db.complete_crawler_run(&request.run_id).await {
+        Ok(()) => Json(json!({
+            "success": true,
+            "run_id": request.run_id,
+            "status": "completed"
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "success": false,
+                "error": format!("Failed to complete run: {}", e)
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// Get the latest crawler state
+/// GET /api/crawler/run/state
+///
+/// Returns the most recent crawler run state, useful for checking
+/// the last known progress and recovering from interruptions.
+///
+/// Returns:
+/// - success: true if state was retrieved
+/// - state: the crawler state object (or null if no runs exist)
+async fn get_run_state(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> impl IntoResponse {
+    match state.db.get_latest_crawler_state().await {
+        Ok(crawler_state) => Json(json!({
+            "success": true,
+            "state": crawler_state
+        }))
+        .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "success": false,
+                "error": format!("Failed to get crawler state: {}", e)
             })),
         )
             .into_response(),

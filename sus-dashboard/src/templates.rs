@@ -145,6 +145,7 @@ impl ErrorTemplate {
     }
 
     /// Create a "version not found" error page
+    #[allow(dead_code)]
     pub fn version_not_found(crate_name: &str, version: &str) -> Self {
         Self {
             title: format!("Version {} Not Found", version),
