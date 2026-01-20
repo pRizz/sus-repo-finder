@@ -1,0 +1,474 @@
+<project_specification>
+  <project_name>Sus Repo Finder</project_name>
+
+  <overview>
+    A Rust monorepo containing two applications: (1) a crawler that periodically scans crates.io to inspect build.rs files and proc-macro crates for suspicious code patterns like network calls, file access, and obfuscation, and (2) a read-only web dashboard that displays findings with severity levels, code snippets, and historical tracking. The system is designed to help the Rust community identify potentially malicious or risky build-time code in crates before depending on them.
+  </overview>
+
+  <technology_stack>
+    <frontend>
+      <framework>htmx with server-rendered HTML templates</framework>
+      <styling>Tailwind CSS</styling>
+      <theme>Dark mode by default, modern aesthetic</theme>
+    </frontend>
+    <backend>
+      <runtime>Rust with Tokio async runtime</runtime>
+      <framework>Axum</framework>
+      <database>SQLite with sqlx</database>
+      <parsing>syn crate for Rust AST parsing</parsing>
+    </backend>
+    <communication>
+      <api>REST API for dashboard, Server-Sent Events for crawler live updates</api>
+    </communication>
+    <monorepo_structure>
+      <workspace>Cargo workspace with shared crates</workspace>
+      <crates>
+        - sus-crawler: The crawler application with embedded web portal
+        - sus-dashboard: The read-only findings dashboard
+        - sus-core: Shared database models, queries, types
+        - sus-detector: Pattern detection logic (shared by crawler and dashboard for display)
+      </crates>
+    </monorepo_structure>
+  </technology_stack>
+
+  <prerequisites>
+    <environment_setup>
+      - Rust toolchain (rustup with stable channel)
+      - SQLite3
+      - Node.js (for Tailwind CSS build)
+    </environment_setup>
+  </prerequisites>
+
+  <feature_count>170</feature_count>
+
+  <security_and_access_control>
+    <user_roles>
+      <role name="anonymous">
+        <permissions>
+          - Can view all public dashboard pages
+          - Can search and filter crates
+          - Can view findings and code snippets
+          - Cannot modify any data
+        </permissions>
+        <protected_routes>
+          - None (read-only public dashboard)
+        </protected_routes>
+      </role>
+    </user_roles>
+    <authentication>
+      <method>None required for MVP (read-only dashboard)</method>
+      <session_timeout>N/A</session_timeout>
+    </authentication>
+    <sensitive_operations>
+      - Crawler controls (pause/resume) are localhost-only or require basic auth
+    </sensitive_operations>
+  </security_and_access_control>
+
+  <core_features>
+    <crawler_core>
+      - Fetch crate metadata from crates.io API or data dumps
+      - Download and extract crate source code
+      - Parse build.rs files using syn crate
+      - Parse proc-macro crates for suspicious patterns
+      - Store crate metadata (name, versions, repo URL, download count)
+      - Store analysis results with flexible JSON details
+      - Track all versions of every crate
+      - Parallel processing (max 10 crates concurrently)
+      - Rate limiting and politeness delays
+      - Incremental crawling (only new/updated crates)
+    </crawler_core>
+
+    <pattern_detection>
+      - Network calls (reqwest, std::net, hyper, curl bindings)
+      - File system access outside expected paths
+      - Shell command execution (std::process::Command, bash/sh invocation)
+      - Process spawning
+      - Environment variable access (especially sensitive ones)
+      - Dynamic library loading (libloading, dlopen)
+      - Unsafe blocks (especially large ones or with raw pointer manipulation)
+      - Build-time downloads (fetching binaries or code)
+      - Accessing sensitive paths (~/.ssh, ~/.aws, /etc/passwd, credentials)
+      - Base64 or hex decoding (potential obfuscation)
+      - Obfuscated code patterns (encoded strings, unusual byte sequences)
+      - Compiler/linker flag manipulation
+      - Macro-based code generation that writes files
+      - Severity classification (Low, Medium, High) for each pattern
+    </pattern_detection>
+
+    <crawler_resilience>
+      - Checkpoint/resume system (persist crawler state to database)
+      - Graceful shutdown handling (SIGINT/SIGTERM)
+      - Crash recovery (detect incomplete runs on startup)
+      - Idempotent processing (re-analyzing is safe, upserts findings)
+      - Progress persistence (store run metadata in database)
+      - Queue management with persistent state
+    </crawler_resilience>
+
+    <crawler_web_portal>
+      - Simple status page (current crate, progress percentage, findings count)
+      - Detailed status view (live log stream via SSE)
+      - Queue of pending crates
+      - Pause/resume controls
+      - Crawler statistics (runtime, uptime, crates scanned, findings by severity)
+      - Error tracking and display (failed crates, rate limit hits)
+      - Repeated error alerts
+      - Basic auth protection for controls (localhost bypass)
+    </crawler_web_portal>
+
+    <dashboard_landing>
+      - Summary statistics (total crates scanned, total findings, findings by severity)
+      - Recent findings (latest suspicious crates discovered)
+      - Interesting facts (most flagged crate, most common pattern, etc.)
+      - Severity breakdown visualization
+      - Quick search bar
+    </dashboard_landing>
+
+    <dashboard_crate_list>
+      - Searchable crate list
+      - Filter by severity level (Low, Medium, High)
+      - Filter by issue type (network, file access, shell, etc.)
+      - Filter by crate popularity (download count ranges)
+      - Sort by most recent analysis
+      - Sort by severity (most severe first)
+      - Sort by download count (most popular first)
+      - Pagination with preserved filters
+      - Show crate name, latest version, finding count, max severity
+    </dashboard_crate_list>
+
+    <dashboard_crate_detail>
+      - Crate overview (name, description, repo URL, download count)
+      - Version selector (default to latest)
+      - Findings list for selected version
+      - Code snippets with surrounding context (3-5 lines)
+      - Syntax highlighting for Rust code
+      - Direct links to source file and line in repository
+      - Issue type and severity badges
+      - Version comparison table (separate tab/view)
+      - Historical tracking: new findings vs existing findings
+      - Show removed patterns in newer versions
+    </dashboard_crate_detail>
+
+    <historical_tracking>
+      - Track findings across all versions
+      - Highlight new findings in latest version
+      - Indicate findings that were removed/fixed
+      - Version-to-version diff summary
+    </historical_tracking>
+
+    <documentation>
+      - Comprehensive README with features, setup, and usage
+      - Usage examples and user flows
+      - Code comments explaining complex logic (pattern detection algorithms)
+      - Public API documentation for shared library functions
+      - Architecture overview in documentation
+    </documentation>
+
+    <ui_polish>
+      - Dark mode default theme
+      - Modern, clean design aesthetic
+      - Responsive layout (desktop, tablet, mobile)
+      - Loading states and spinners
+      - Empty states with helpful messages
+      - Error states with clear messaging
+      - Smooth transitions and hover effects
+    </ui_polish>
+  </core_features>
+
+  <database_schema>
+    <tables>
+      <crates>
+        - id (INTEGER PRIMARY KEY)
+        - name (TEXT UNIQUE NOT NULL)
+        - repo_url (TEXT)
+        - description (TEXT)
+        - download_count (INTEGER)
+        - created_at (TIMESTAMP)
+        - updated_at (TIMESTAMP)
+      </crates>
+
+      <versions>
+        - id (INTEGER PRIMARY KEY)
+        - crate_id (INTEGER FOREIGN KEY -> crates.id)
+        - version_number (TEXT NOT NULL)
+        - release_date (TIMESTAMP)
+        - last_analyzed (TIMESTAMP)
+        - analysis_status (TEXT: pending, in_progress, completed, failed)
+        - has_build_rs (BOOLEAN)
+        - is_proc_macro (BOOLEAN)
+        - UNIQUE(crate_id, version_number)
+      </versions>
+
+      <analysis_results>
+        - id (INTEGER PRIMARY KEY)
+        - version_id (INTEGER FOREIGN KEY -> versions.id)
+        - issue_type (TEXT NOT NULL: network, file_access, shell_command, process_spawn, env_access, dynamic_lib, unsafe_block, build_download, sensitive_path, obfuscation, compiler_flags, macro_codegen)
+        - severity (TEXT NOT NULL: low, medium, high)
+        - file_path (TEXT NOT NULL)
+        - line_start (INTEGER)
+        - line_end (INTEGER)
+        - code_snippet (TEXT)
+        - context_before (TEXT)
+        - context_after (TEXT)
+        - summary (TEXT)
+        - details (TEXT JSON)
+        - created_at (TIMESTAMP)
+      </analysis_results>
+
+      <crawler_state>
+        - id (INTEGER PRIMARY KEY)
+        - run_id (TEXT UNIQUE NOT NULL)
+        - status (TEXT: running, paused, completed, crashed)
+        - started_at (TIMESTAMP)
+        - last_checkpoint (TIMESTAMP)
+        - crates_processed (INTEGER)
+        - crates_total (INTEGER)
+        - current_crate (TEXT)
+        - queue_position (INTEGER)
+        - errors_count (INTEGER)
+        - findings_count (INTEGER)
+      </crawler_state>
+
+      <crawler_errors>
+        - id (INTEGER PRIMARY KEY)
+        - run_id (TEXT FOREIGN KEY -> crawler_state.run_id)
+        - crate_name (TEXT)
+        - version (TEXT)
+        - error_type (TEXT)
+        - error_message (TEXT)
+        - occurred_at (TIMESTAMP)
+        - retry_count (INTEGER)
+      </crawler_errors>
+
+      <crawler_queue>
+        - id (INTEGER PRIMARY KEY)
+        - crate_name (TEXT NOT NULL)
+        - version (TEXT NOT NULL)
+        - priority (INTEGER)
+        - status (TEXT: pending, in_progress, completed, failed)
+        - added_at (TIMESTAMP)
+        - started_at (TIMESTAMP)
+        - completed_at (TIMESTAMP)
+      </crawler_queue>
+    </tables>
+  </database_schema>
+
+  <api_endpoints_summary>
+    <dashboard_api>
+      - GET /api/stats - Dashboard summary statistics
+      - GET /api/crates - List crates with filters and pagination
+      - GET /api/crates/:name - Crate detail with versions
+      - GET /api/crates/:name/versions/:version - Version detail with findings
+      - GET /api/crates/:name/compare - Version comparison data
+      - GET /api/findings/recent - Recent findings for landing page
+      - GET /api/findings/interesting - Interesting facts and stats
+    </dashboard_api>
+
+    <crawler_portal_api>
+      - GET /api/crawler/status - Current crawler status
+      - GET /api/crawler/stats - Crawler statistics
+      - GET /api/crawler/queue - Queue status
+      - GET /api/crawler/errors - Recent errors
+      - GET /api/crawler/logs - SSE endpoint for live logs
+      - POST /api/crawler/pause - Pause crawler
+      - POST /api/crawler/resume - Resume crawler
+    </crawler_portal_api>
+
+    <dashboard_pages>
+      - GET / - Landing page with summary
+      - GET /crates - Crate list with search/filters
+      - GET /crates/:name - Crate detail page
+      - GET /crates/:name/compare - Version comparison page
+    </dashboard_pages>
+
+    <crawler_portal_pages>
+      - GET / - Crawler status page
+      - GET /detailed - Detailed view with logs
+      - GET /errors - Error tracking page
+    </crawler_portal_pages>
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <dashboard_main_structure>
+      - Top navigation bar with logo, search, and nav links
+      - Main content area (responsive width)
+      - Footer with links and info
+    </dashboard_main_structure>
+
+    <dashboard_landing_layout>
+      - Hero section with summary stats cards
+      - Recent findings section (card grid)
+      - Interesting facts section
+      - Quick search prominent
+    </dashboard_landing_layout>
+
+    <dashboard_crate_list_layout>
+      - Filter sidebar (collapsible on mobile)
+      - Crate cards/rows in main area
+      - Pagination at bottom
+    </dashboard_crate_list_layout>
+
+    <dashboard_crate_detail_layout>
+      - Crate header (name, badges, links)
+      - Tab navigation (Findings, Version Comparison)
+      - Version selector dropdown
+      - Findings list with expandable code snippets
+    </dashboard_crate_detail_layout>
+
+    <crawler_portal_layout>
+      - Simple header with status indicator
+      - Stats cards row
+      - Progress section
+      - Log viewer (scrollable, auto-updating)
+      - Control buttons (pause/resume)
+      - Error summary section
+    </crawler_portal_layout>
+  </ui_layout>
+
+  <design_system>
+    <color_palette>
+      - Background: Dark grays (#0d1117, #161b22, #21262d)
+      - Text: Light grays and white (#c9d1d9, #f0f6fc)
+      - Accent: Blue (#58a6ff) for links and interactive elements
+      - Severity High: Red (#f85149)
+      - Severity Medium: Orange (#d29922)
+      - Severity Low: Yellow (#e3b341)
+      - Success: Green (#3fb950)
+    </color_palette>
+    <typography>
+      - Font family: System fonts (Inter, -apple-system, sans-serif)
+      - Monospace: JetBrains Mono or Fira Code for code snippets
+    </typography>
+  </design_system>
+
+  <implementation_steps>
+    <step number="1">
+      <title>Project Setup and Shared Core</title>
+      <tasks>
+        - Initialize Cargo workspace with all crates
+        - Set up sus-core with database models and migrations
+        - Define shared types (Severity, IssueType, etc.)
+        - Set up SQLite database with sqlx
+        - Create database migration scripts
+        - Write basic README structure
+      </tasks>
+    </step>
+
+    <step number="2">
+      <title>Pattern Detection Engine</title>
+      <tasks>
+        - Implement sus-detector crate
+        - Build AST parsing with syn for build.rs files
+        - Implement each pattern detector (network, file, shell, etc.)
+        - Add severity classification logic
+        - Create code snippet extraction with context
+        - Add unit tests for pattern detection
+        - Document pattern detection algorithms
+      </tasks>
+    </step>
+
+    <step number="3">
+      <title>Crawler Core</title>
+      <tasks>
+        - Implement crates.io API client
+        - Build crate download and extraction
+        - Implement parallel processing with rate limiting
+        - Create checkpoint/resume system
+        - Add graceful shutdown handling
+        - Implement error tracking and retry logic
+        - Build queue management
+        - Integration with sus-detector
+      </tasks>
+    </step>
+
+    <step number="4">
+      <title>Crawler Web Portal</title>
+      <tasks>
+        - Set up Axum server for crawler portal
+        - Implement status and stats endpoints
+        - Build SSE for live log streaming
+        - Create pause/resume controls
+        - Build HTML templates with htmx
+        - Add Tailwind CSS styling
+        - Implement error tracking views
+      </tasks>
+    </step>
+
+    <step number="5">
+      <title>Dashboard Backend</title>
+      <tasks>
+        - Set up Axum server for dashboard
+        - Implement all API endpoints
+        - Build query logic for filters and search
+        - Add pagination support
+        - Implement version comparison logic
+        - Add historical tracking queries
+      </tasks>
+    </step>
+
+    <step number="6">
+      <title>Dashboard Frontend</title>
+      <tasks>
+        - Create HTML templates for all pages
+        - Implement htmx interactions
+        - Build code snippet display with syntax highlighting
+        - Add filter/search UI components
+        - Implement version selector
+        - Create version comparison view
+        - Style with Tailwind CSS (dark mode)
+      </tasks>
+    </step>
+
+    <step number="7">
+      <title>Polish and Documentation</title>
+      <tasks>
+        - Add loading states and animations
+        - Implement empty and error states
+        - Ensure responsive design
+        - Complete README documentation
+        - Add code comments for complex logic
+        - Document public APIs
+        - Write usage examples
+        - Final testing and bug fixes
+      </tasks>
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <functionality>
+      - Crawler can successfully scan crates.io crates
+      - All 12+ suspicious patterns are detected correctly
+      - Crawler resumes cleanly after pause/crash
+      - Dashboard displays all findings accurately
+      - Search and filters work correctly
+      - Version comparison shows differences
+      - Historical tracking identifies new/removed findings
+    </functionality>
+    <user_experience>
+      - Dashboard loads quickly (<3s for typical pages)
+      - Filters are intuitive and responsive
+      - Code snippets are readable with proper highlighting
+      - Crawler portal provides clear status visibility
+      - Mobile experience is functional
+    </user_experience>
+    <technical_quality>
+      - No unwrap() calls in production code
+      - Proper error handling throughout
+      - Clean separation between crates
+      - Idiomatic Rust code
+      - Comprehensive tests for pattern detection
+    </technical_quality>
+    <design_polish>
+      - Consistent dark theme throughout
+      - Modern, professional appearance
+      - Smooth interactions and transitions
+      - Clear visual hierarchy
+      - Accessible color contrast
+    </design_polish>
+    <documentation>
+      - README explains features, setup, and usage
+      - Complex code is well-commented
+      - Public APIs are documented
+      - Architecture is explained
+    </documentation>
+  </success_criteria>
+</project_specification>

@@ -1,0 +1,4 @@
+{
+  "source": "use std::fs::File;\nuse std::io::Read;\n\nfn main() {\n    let mut file = File::open(\"test.txt\").unwrap();\n    let mut contents = String::new();\n    file.read_to_string(&mut contents).unwrap();\n}",
+  "file_path": "build.rs"
+}
