@@ -336,6 +336,7 @@ impl Detector {
                 findings.extend(self.detect_sensitive_paths(&syntax_tree, source, file_path));
                 findings.extend(self.detect_obfuscation(&syntax_tree, source, file_path));
                 findings.extend(self.detect_build_download(&syntax_tree, source, file_path));
+                findings.extend(self.detect_macro_codegen(&syntax_tree, source, file_path));
                 findings.extend(self.detect_compiler_flags(source, file_path));
             }
             Err(e) => {
@@ -2221,10 +2222,13 @@ impl<'a> Visit<'a> for SensitivePathVisitor<'a> {
                     if let Expr::Lit(ExprLit { lit, .. }) = arg {
                         if let Some(arg_str) = Self::extract_string_literal(lit) {
                             if let Some(_pattern) = Self::contains_sensitive_path(&arg_str) {
-                                let line = self.get_line_number(path.segments.first().map_or_else(
-                                    proc_macro2::Span::call_site,
-                                    |s| s.ident.span(),
-                                ));
+                                let line = self.get_line_number(
+                                    path.segments
+                                        .first()
+                                        .map_or_else(proc_macro2::Span::call_site, |s| {
+                                            s.ident.span()
+                                        }),
+                                );
                                 self.create_finding(
                                     line,
                                     &arg_str,
@@ -2989,13 +2993,7 @@ const MACRO_CODEGEN_PATTERNS: &[&str] = &[
 ];
 
 /// Method names that indicate file writing in proc-macro context
-const MACRO_CODEGEN_METHODS: &[&str] = &[
-    "write",
-    "write_all",
-    "write_fmt",
-    "create",
-    "flush",
-];
+const MACRO_CODEGEN_METHODS: &[&str] = &["write", "write_all", "write_fmt", "create", "flush"];
 
 /// Visitor that detects proc-macro code that writes to the file system
 struct MacroCodegenVisitor<'a> {
@@ -3083,10 +3081,7 @@ impl<'a> Visit<'a> for MacroCodegenVisitor<'a> {
             self.create_finding(
                 line,
                 pattern,
-                &format!(
-                    "File writing import in {} context: {}",
-                    context, use_str
-                ),
+                &format!("File writing import in {} context: {}", context, use_str),
             );
         }
         syn::visit::visit_item_use(self, node);
@@ -3114,10 +3109,7 @@ impl<'a> Visit<'a> for MacroCodegenVisitor<'a> {
                 self.create_finding(
                     line,
                     pattern,
-                    &format!(
-                        "File writing call in {} context: {}",
-                        context, path_str
-                    ),
+                    &format!("File writing call in {} context: {}", context, path_str),
                 );
             }
         }
@@ -3168,10 +3160,7 @@ impl<'a> Visit<'a> for MacroCodegenVisitor<'a> {
             self.create_finding(
                 line,
                 pattern,
-                &format!(
-                    "File system reference in {} context: {}",
-                    context, path_str
-                ),
+                &format!("File system reference in {} context: {}", context, path_str),
             );
         }
         syn::visit::visit_expr_path(self, node);

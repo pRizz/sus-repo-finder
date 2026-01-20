@@ -2,7 +2,7 @@
 
 use askama::Template;
 use axum::{
-    extract::{FromRequestParts, Path, Query, State, rejection::QueryRejection},
+    extract::{rejection::QueryRejection, FromRequestParts, Path, Query, State},
     http::{request::Parts, StatusCode},
     response::{Html, IntoResponse, Json, Response},
     routing::get,
@@ -54,10 +54,9 @@ where
                 let template = ErrorTemplate::bad_request(&detail);
                 match template.render() {
                     Ok(html) => Err((StatusCode::BAD_REQUEST, Html(html)).into_response()),
-                    Err(_) => Err((
-                        StatusCode::BAD_REQUEST,
-                        "Invalid URL parameters",
-                    ).into_response()),
+                    Err(_) => {
+                        Err((StatusCode::BAD_REQUEST, "Invalid URL parameters").into_response())
+                    }
                 }
             }
         }
@@ -150,7 +149,10 @@ async fn index(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         .into_response(),
         (Err(err), _) | (_, Err(err)) => {
             tracing::error!("Database error loading dashboard: {}", err);
-            render_with_status(StatusCode::INTERNAL_SERVER_ERROR, ErrorTemplate::server_error())
+            render_with_status(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ErrorTemplate::server_error(),
+            )
         }
     }
 }
@@ -179,7 +181,10 @@ async fn crate_list(
             Ok(count) => count,
             Err(err) => {
                 tracing::error!("Database error getting search count: {}", err);
-                return render_with_status(StatusCode::INTERNAL_SERVER_ERROR, ErrorTemplate::server_error());
+                return render_with_status(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ErrorTemplate::server_error(),
+                );
             }
         }
     } else {
@@ -187,7 +192,10 @@ async fn crate_list(
             Ok(count) => count,
             Err(err) => {
                 tracing::error!("Database error getting count: {}", err);
-                return render_with_status(StatusCode::INTERNAL_SERVER_ERROR, ErrorTemplate::server_error());
+                return render_with_status(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ErrorTemplate::server_error(),
+                );
             }
         }
     };
@@ -200,7 +208,11 @@ async fn crate_list(
     let page = page.min(total_pages);
 
     // Pre-compute pagination values
-    let showing_start = if total_crates == 0 { 0 } else { (page - 1) * per_page + 1 };
+    let showing_start = if total_crates == 0 {
+        0
+    } else {
+        (page - 1) * per_page + 1
+    };
     let showing_end = (page * per_page).min(total_crates as u32);
     let has_prev = page > 1;
     let has_next = page < total_pages;
@@ -217,10 +229,16 @@ async fn crate_list(
 
     // Get paginated crates (with search filter and sort if applicable)
     let crates_result = if let Some(ref search_term) = search {
-        state.db.search_crates_paginated(search_term, page, per_page).await
+        state
+            .db
+            .search_crates_paginated(search_term, page, per_page)
+            .await
     } else {
         // Use sorted query when sort is specified
-        state.db.get_crates_paginated_sorted(page, per_page, &sort).await
+        state
+            .db
+            .get_crates_paginated_sorted(page, per_page, &sort)
+            .await
     };
 
     match crates_result {
@@ -243,7 +261,10 @@ async fn crate_list(
         .into_response(),
         Err(err) => {
             tracing::error!("Database error: {}", err);
-            render_with_status(StatusCode::INTERNAL_SERVER_ERROR, ErrorTemplate::server_error())
+            render_with_status(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ErrorTemplate::server_error(),
+            )
         }
     }
 }
@@ -309,7 +330,10 @@ async fn crate_detail(
         }
         Err(err) => {
             tracing::error!("Database error loading crate '{}': {}", name, err);
-            render_with_status(StatusCode::INTERNAL_SERVER_ERROR, ErrorTemplate::server_error())
+            render_with_status(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                ErrorTemplate::server_error(),
+            )
         }
     }
 }

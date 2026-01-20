@@ -171,7 +171,11 @@ async fn index(
     let queue_size = state.db.get_pending_queue_count().await.unwrap_or(0);
 
     // Fetch pending queue items (limited to 10 for display)
-    let queue_items_rows = state.db.get_pending_queue_items_limited(10).await.unwrap_or_default();
+    let queue_items_rows = state
+        .db
+        .get_pending_queue_items_limited(10)
+        .await
+        .unwrap_or_default();
     let queue_items: Vec<QueueItemDisplay> = queue_items_rows
         .into_iter()
         .map(|row| QueueItemDisplay {
@@ -185,10 +189,10 @@ async fn index(
         "idle",
         crates_scanned,
         findings_count,
-        0,          // errors_count - TODO: fetch from database
+        0, // errors_count - TODO: fetch from database
         queue_size,
-        None,       // current_crate
-        0.0,        // progress_percent
+        None, // current_crate
+        0.0,  // progress_percent
         queue_items,
     );
 
@@ -240,18 +244,24 @@ async fn queue(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let pending_count = state.db.get_pending_queue_count().await.unwrap_or(0);
-    let items = state.db.get_pending_queue_items_limited(50).await.unwrap_or_default();
+    let items = state
+        .db
+        .get_pending_queue_items_limited(50)
+        .await
+        .unwrap_or_default();
 
     let items_json: Vec<serde_json::Value> = items
         .iter()
-        .map(|item| json!({
-            "id": item.id,
-            "crate_name": item.crate_name,
-            "version": item.version,
-            "priority": item.priority,
-            "status": item.status,
-            "added_at": item.added_at
-        }))
+        .map(|item| {
+            json!({
+                "id": item.id,
+                "crate_name": item.crate_name,
+                "version": item.version,
+                "priority": item.priority,
+                "status": item.status,
+                "added_at": item.added_at
+            })
+        })
         .collect();
 
     Json(json!({
@@ -301,19 +311,18 @@ async fn logs_sse(
     state.send_log("info", "SSE client connected to log stream", Some("sse"));
 
     // Convert the broadcast receiver into a stream
-    let stream = BroadcastStream::new(receiver)
-        .filter_map(|result| {
-            match result {
-                Ok(msg) => {
-                    // Serialize the log message to JSON
-                    match serde_json::to_string(&msg) {
-                        Ok(json) => Some(Ok(Event::default().data(json))),
-                        Err(_) => None,
-                    }
+    let stream = BroadcastStream::new(receiver).filter_map(|result| {
+        match result {
+            Ok(msg) => {
+                // Serialize the log message to JSON
+                match serde_json::to_string(&msg) {
+                    Ok(json) => Some(Ok(Event::default().data(json))),
+                    Err(_) => None,
                 }
-                Err(_) => None, // Skip lagged messages
             }
-        });
+            Err(_) => None, // Skip lagged messages
+        }
+    });
 
     // Create a heartbeat stream that sends a ping every 15 seconds to keep connection alive
     let heartbeat = stream::repeat_with(|| {
@@ -758,8 +767,7 @@ async fn store_finding(
         summary: request.summary.as_deref(),
         details: request.details.as_deref(),
     };
-    let finding_id = match state.db.insert_analysis_result(&input).await
-    {
+    let finding_id = match state.db.insert_analysis_result(&input).await {
         Ok(id) => id,
         Err(e) => {
             return (
