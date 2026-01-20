@@ -1392,6 +1392,13 @@ A subsequent session or manual intervention is needed to:
 2. Run `cargo test` to verify unit tests pass
 3. Restart the crawler server
 4. Complete browser-based verification
+
+#### Session Summary (2026-01-19):
+- Feature #20 implementation COMPLETE
+- Code changes committed: 8095c95, 4e36ec5, 51da5ab
+- All code is in working tree (git status clean for detector.rs)
+- Feature remains IN_PROGRESS pending build/test verification
+- Next session should: rebuild, test, verify via browser, mark passing
 [Testing] 2026-01-19 18:49:05 - Regression test for Feature #6 (Dark theme applied by default)
   - Dashboard (localhost:3002):
     - Background: #0d1117 (rgb(13, 17, 23)) ✅
