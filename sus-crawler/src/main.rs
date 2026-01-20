@@ -7,7 +7,6 @@ use anyhow::Result;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod api;
-mod crawler;
 mod templates;
 
 #[tokio::main]

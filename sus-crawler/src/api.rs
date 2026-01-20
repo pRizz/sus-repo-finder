@@ -8,12 +8,13 @@ use axum::{
     routing::get,
     Router,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use sus_core::Database;
 
 use crate::templates::StatusTemplate;
-use sus_crawler::{CrateDownloader, CratesIoClient};
+use sus_crawler::{CrateDownloader, Crawler, CrawlerConfig, CratesIoClient};
 
 /// Wrapper for rendering Askama templates as HTML responses
 pub struct HtmlTemplate<T>(pub T);
@@ -36,13 +37,12 @@ where
 
 /// Application state shared across handlers
 pub struct AppState {
-    /// Database connection - will be used once API handlers are implemented
-    #[allow(dead_code)]
-    pub db: Database,
-    /// Crates.io API client
-    pub crates_io_client: CratesIoClient,
-    /// Crate downloader for source extraction
-    pub crate_downloader: CrateDownloader,
+    /// Database connection (Arc-wrapped for sharing with Crawler)
+    pub db: Arc<Database>,
+    /// Crates.io API client (Arc-wrapped for sharing with Crawler)
+    pub crates_io_client: Arc<CratesIoClient>,
+    /// Crate downloader for source extraction (Arc-wrapped for sharing with Crawler)
+    pub crate_downloader: Arc<CrateDownloader>,
 }
 
 /// Create the API router
@@ -56,9 +56,9 @@ pub fn create_router(db: Database) -> Router {
         .expect("Failed to create crate downloader");
 
     let state = Arc::new(AppState {
-        db,
-        crates_io_client,
-        crate_downloader,
+        db: Arc::new(db),
+        crates_io_client: Arc::new(crates_io_client),
+        crate_downloader: Arc::new(crate_downloader),
     });
 
     Router::new()
@@ -79,6 +79,10 @@ pub fn create_router(db: Database) -> Router {
         .route("/api/crawler/crawl-and-store/{name}", axum::routing::post(crawl_and_store))
         // Get stored crate endpoint: retrieves a crate from the database
         .route("/api/crawler/stored-crate/{name}", get(get_stored_crate))
+        // Store an analysis result (finding) in the database
+        .route("/api/crawler/store-finding", axum::routing::post(store_finding))
+        // Get all findings for a specific crate version
+        .route("/api/crawler/findings/{crate_name}/{version}", get(get_findings))
         .with_state(state)
 }
 
@@ -392,4 +396,271 @@ async fn get_stored_crate(
         )
             .into_response(),
     }
+}
+
+/// Request body for storing an analysis result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoreAnalysisResultRequest {
+    /// Crate name (used to look up version_id)
+    pub crate_name: String,
+    /// Version number (used with crate_name to look up version_id)
+    pub version: String,
+    /// Type of issue detected
+    pub issue_type: String,
+    /// Severity level (low, medium, high)
+    pub severity: String,
+    /// Path to the file containing the issue
+    pub file_path: String,
+    /// Starting line number (optional)
+    pub line_start: Option<i32>,
+    /// Ending line number (optional)
+    pub line_end: Option<i32>,
+    /// Code snippet containing the issue (optional)
+    pub code_snippet: Option<String>,
+    /// Context before the code snippet (optional)
+    pub context_before: Option<String>,
+    /// Context after the code snippet (optional)
+    pub context_after: Option<String>,
+    /// Summary of the finding (optional)
+    pub summary: Option<String>,
+    /// Detailed information as JSON (optional)
+    pub details: Option<String>,
+}
+
+/// Store an analysis result (finding) in the database
+/// POST /api/crawler/store-finding
+///
+/// This endpoint stores a single analysis finding for a specific crate version.
+/// The crate and version must already exist in the database (use crawl-and-store first).
+///
+/// Request body (JSON):
+/// - crate_name: name of the crate
+/// - version: version number
+/// - issue_type: type of issue (network, file_access, shell_command, etc.)
+/// - severity: severity level (low, medium, high)
+/// - file_path: path to the file containing the issue
+/// - line_start, line_end: optional line numbers
+/// - code_snippet: optional code excerpt
+/// - context_before, context_after: optional surrounding context
+/// - summary: optional human-readable summary
+/// - details: optional JSON details
+///
+/// Returns:
+/// - finding_id: database ID of the stored finding
+/// - version_id: version ID the finding is associated with
+async fn store_finding(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Json(request): axum::extract::Json<StoreAnalysisResultRequest>,
+) -> impl IntoResponse {
+    // Step 1: Look up the version_id by crate name and version number
+    let version_id = match state
+        .db
+        .get_version_id(&request.crate_name, &request.version)
+        .await
+    {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "success": false,
+                    "error": format!(
+                        "Version '{}' for crate '{}' not found. Use crawl-and-store first.",
+                        request.version, request.crate_name
+                    )
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": format!("Database error: {}", e)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Step 2: Insert the analysis result
+    let finding_id = match state
+        .db
+        .insert_analysis_result(
+            version_id,
+            &request.issue_type,
+            &request.severity,
+            &request.file_path,
+            request.line_start,
+            request.line_end,
+            request.code_snippet.as_deref(),
+            request.context_before.as_deref(),
+            request.context_after.as_deref(),
+            request.summary.as_deref(),
+            request.details.as_deref(),
+        )
+        .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": format!("Failed to store finding: {}", e)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Return success response
+    Json(json!({
+        "success": true,
+        "finding_id": finding_id,
+        "version_id": version_id,
+        "stored": {
+            "crate_name": request.crate_name,
+            "version": request.version,
+            "issue_type": request.issue_type,
+            "severity": request.severity,
+            "file_path": request.file_path,
+            "line_start": request.line_start,
+            "line_end": request.line_end
+        }
+    }))
+    .into_response()
+}
+
+/// Get all findings for a specific crate version
+/// GET /api/crawler/findings/{crate_name}/{version}
+///
+/// Returns all analysis results (findings) for the specified crate version.
+async fn get_findings(
+    Path((crate_name, version)): Path<(String, String)>,
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> impl IntoResponse {
+    // Step 1: Look up the version_id
+    let version_id = match state.db.get_version_id(&crate_name, &version).await {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "success": false,
+                    "error": format!(
+                        "Version '{}' for crate '{}' not found",
+                        version, crate_name
+                    )
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": format!("Database error: {}", e)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    // Step 2: Get all findings for this version
+    let findings = match state.db.get_findings_by_version(version_id).await {
+        Ok(findings) => findings,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": format!("Failed to retrieve findings: {}", e)
+                })),
+            )
+                .into_response();
+        }
+    };
+
+    Json(json!({
+        "success": true,
+        "crate_name": crate_name,
+        "version": version,
+        "version_id": version_id,
+        "count": findings.len(),
+        "findings": findings
+    }))
+    .into_response()
+}
+
+/// Request body for parallel crate processing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessParallelRequest {
+    /// List of crate names to process
+    pub crate_names: Vec<String>,
+    /// Maximum concurrent downloads (optional, defaults to 10)
+    pub max_concurrent: Option<usize>,
+}
+
+/// Process multiple crates in parallel
+/// POST /api/crawler/process-parallel
+///
+/// This endpoint fetches metadata and stores multiple crates concurrently.
+/// It uses a semaphore to limit concurrent requests to crates.io.
+///
+/// Request body (JSON):
+/// - crate_names: array of crate names to process
+/// - max_concurrent: optional max concurrent requests (default: 10)
+///
+/// Returns:
+/// - total: total number of crates processed
+/// - successful: number of successful operations
+/// - failed: number of failed operations
+/// - results: detailed results for each crate
+async fn process_parallel(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::extract::Json(request): axum::extract::Json<ProcessParallelRequest>,
+) -> impl IntoResponse {
+    let max_concurrent = request.max_concurrent.unwrap_or(10);
+
+    // Create a Crawler instance with the configured concurrency
+    let config = CrawlerConfig { max_concurrent };
+    let crawler = Crawler::from_arc(
+        Arc::clone(&state.db),
+        Arc::clone(&state.crates_io_client),
+        Arc::clone(&state.crate_downloader),
+        config,
+    );
+
+    // Process the crates in parallel
+    let results = crawler.process_crates(request.crate_names).await;
+
+    // Count successes and failures
+    let successful = results.iter().filter(|r| r.success).count();
+    let failed = results.iter().filter(|r| !r.success).count();
+
+    // Build results array
+    let result_json: Vec<serde_json::Value> = results
+        .iter()
+        .map(|r| {
+            json!({
+                "name": r.name,
+                "version": r.version,
+                "success": r.success,
+                "error": r.error,
+                "crate_id": r.crate_id,
+                "version_id": r.version_id
+            })
+        })
+        .collect();
+
+    Json(json!({
+        "success": true,
+        "total": results.len(),
+        "successful": successful,
+        "failed": failed,
+        "results": result_json
+    }))
 }

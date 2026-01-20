@@ -343,6 +343,111 @@ impl Database {
 
         Ok(crate_info)
     }
+
+    /// Get the version ID for a crate by name and version number
+    ///
+    /// Returns None if the crate or version doesn't exist
+    pub async fn get_version_id(
+        &self,
+        crate_name: &str,
+        version_number: &str,
+    ) -> Result<Option<i64>, sqlx::Error> {
+        let result: Option<(i64,)> = sqlx::query_as(
+            r#"
+            SELECT v.id
+            FROM versions v
+            JOIN crates c ON v.crate_id = c.id
+            WHERE c.name = ? AND v.version_number = ?
+            "#,
+        )
+        .bind(crate_name)
+        .bind(version_number)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(result.map(|(id,)| id))
+    }
+
+    /// Insert an analysis result (finding) into the database
+    ///
+    /// Returns the ID of the inserted record.
+    #[instrument(skip(self))]
+    pub async fn insert_analysis_result(
+        &self,
+        version_id: i64,
+        issue_type: &str,
+        severity: &str,
+        file_path: &str,
+        line_start: Option<i32>,
+        line_end: Option<i32>,
+        code_snippet: Option<&str>,
+        context_before: Option<&str>,
+        context_after: Option<&str>,
+        summary: Option<&str>,
+        details: Option<&str>,
+    ) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO analysis_results (
+                version_id, issue_type, severity, file_path,
+                line_start, line_end, code_snippet,
+                context_before, context_after, summary, details
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(version_id)
+        .bind(issue_type)
+        .bind(severity)
+        .bind(file_path)
+        .bind(line_start)
+        .bind(line_end)
+        .bind(code_snippet)
+        .bind(context_before)
+        .bind(context_after)
+        .bind(summary)
+        .bind(details)
+        .execute(&self.pool)
+        .await?;
+
+        let id = result.last_insert_rowid();
+        info!(
+            "Inserted analysis result id={} for version_id={} (type: {}, severity: {})",
+            id, version_id, issue_type, severity
+        );
+        Ok(id)
+    }
+
+    /// Get all analysis results (findings) for a specific version
+    pub async fn get_findings_by_version(
+        &self,
+        version_id: i64,
+    ) -> Result<Vec<crate::models::AnalysisResultRow>, sqlx::Error> {
+        let findings = sqlx::query_as::<_, crate::models::AnalysisResultRow>(
+            r#"
+            SELECT
+                id, version_id, issue_type, severity, file_path,
+                line_start, line_end, code_snippet,
+                context_before, context_after, summary, details, created_at
+            FROM analysis_results
+            WHERE version_id = ?
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(version_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(findings)
+    }
+
+    /// Get total findings count
+    pub async fn get_findings_count(&self) -> Result<i64, sqlx::Error> {
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM analysis_results")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count.0)
+    }
 }
 
 #[cfg(test)]

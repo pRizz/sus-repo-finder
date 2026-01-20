@@ -128,3 +128,22 @@ pub struct RecentFinding {
     pub summary: Option<String>,
     pub created_at: String,
 }
+
+/// An analysis result row from the database
+/// Note: Uses String for timestamps because SQLite returns TEXT format
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AnalysisResultRow {
+    pub id: i64,
+    pub version_id: i64,
+    pub issue_type: String,
+    pub severity: String,
+    pub file_path: String,
+    pub line_start: Option<i32>,
+    pub line_end: Option<i32>,
+    pub code_snippet: Option<String>,
+    pub context_before: Option<String>,
+    pub context_after: Option<String>,
+    pub summary: Option<String>,
+    pub details: Option<String>,
+    pub created_at: String,
+}
