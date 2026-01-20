@@ -1,13 +1,21 @@
 //! API routes for the dashboard
 
-use axum::{routing::get, Router};
+use askama::Template;
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{Html, IntoResponse, Response},
+    routing::get,
+    Router,
+};
 use std::sync::Arc;
 use sus_core::Database;
 
+use crate::templates::CrateListTemplate;
+
 /// Application state shared across handlers
 pub struct AppState {
-    /// Database connection - will be used once API handlers are implemented
-    #[allow(dead_code)]
+    /// Database connection
     pub db: Database,
 }
 
@@ -35,12 +43,51 @@ pub fn create_router(db: Database) -> Router {
         .with_state(state)
 }
 
+/// Wrapper for HTML responses from Askama templates
+struct HtmlTemplate<T>(T);
+
+impl<T> IntoResponse for HtmlTemplate<T>
+where
+    T: Template,
+{
+    fn into_response(self) -> Response {
+        match self.0.render() {
+            Ok(html) => Html(html).into_response(),
+            Err(err) => {
+                tracing::error!("Template error: {}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Template error: {}", err),
+                )
+                    .into_response()
+            }
+        }
+    }
+}
+
 async fn index() -> &'static str {
     "Sus Dashboard - Landing Page (TODO: implement template)"
 }
 
-async fn crate_list() -> &'static str {
-    "Sus Dashboard - Crate List (TODO: implement template)"
+async fn crate_list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.db.get_crates().await {
+        Ok(crates) => {
+            let total_crates = crates.len() as i64;
+            HtmlTemplate(CrateListTemplate {
+                crates,
+                total_crates,
+            })
+            .into_response()
+        }
+        Err(err) => {
+            tracing::error!("Database error: {}", err);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Database error: {}", err),
+            )
+                .into_response()
+        }
+    }
 }
 
 async fn crate_detail() -> &'static str {

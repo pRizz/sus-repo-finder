@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
 
 /// A crate from crates.io
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +14,24 @@ pub struct Crate {
     pub download_count: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// A crate with additional stats for display
+/// Note: Uses String for timestamps because SQLite returns TEXT format
+/// and this struct derives FromRow for direct database queries.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CrateWithStats {
+    pub id: i64,
+    pub name: String,
+    pub repo_url: Option<String>,
+    pub description: Option<String>,
+    pub download_count: i64,
+    /// Created timestamp as stored in SQLite (TEXT format)
+    pub created_at: String,
+    /// Updated timestamp as stored in SQLite (TEXT format)
+    pub updated_at: String,
+    pub finding_count: i64,
+    pub max_severity: Option<String>,
 }
 
 /// A version of a crate

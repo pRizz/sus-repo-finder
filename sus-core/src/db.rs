@@ -80,6 +80,42 @@ impl Database {
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
+
+    /// Get all crates with basic info
+    pub async fn get_crates(&self) -> Result<Vec<crate::models::CrateWithStats>, sqlx::Error> {
+        let crates = sqlx::query_as::<_, crate::models::CrateWithStats>(
+            r#"
+            SELECT
+                c.id,
+                c.name,
+                c.repo_url,
+                c.description,
+                c.download_count,
+                c.created_at,
+                c.updated_at,
+                (SELECT COUNT(*) FROM analysis_results ar
+                 JOIN versions v ON ar.version_id = v.id
+                 WHERE v.crate_id = c.id) as finding_count,
+                (SELECT MAX(ar.severity) FROM analysis_results ar
+                 JOIN versions v ON ar.version_id = v.id
+                 WHERE v.crate_id = c.id) as max_severity
+            FROM crates c
+            ORDER BY c.updated_at DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(crates)
+    }
+
+    /// Get the count of all crates
+    pub async fn get_crate_count(&self) -> Result<i64, sqlx::Error> {
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM crates")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count.0)
+    }
 }
 
 #[cfg(test)]

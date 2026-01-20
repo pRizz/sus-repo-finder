@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Crates - Sus Repo Finder{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold text-white">Scanned Crates</h1>
+        <p class="text-gray-400">{{ total_crates }} crate{{ total_crates|pluralize }} scanned</p>
+    </div>
+
+    {% if crates.is_empty() %}
+    <div class="bg-dark-surface rounded-lg border border-dark-border p-12 text-center">
+        <svg class="mx-auto h-12 w-12 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+        </svg>
+        <h3 class="mt-2 text-lg font-medium text-gray-200">No crates scanned yet</h3>
+        <p class="mt-1 text-sm text-gray-400">The crawler hasn't scanned any crates. Start the crawler to begin analysis.</p>
+    </div>
+    {% else %}
+    <div class="bg-dark-surface rounded-lg border border-dark-border overflow-hidden">
+        <table class="min-w-full divide-y divide-dark-border">
+            <thead class="bg-dark-bg">
+                <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                        Crate
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                        Downloads
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                        Findings
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                        Severity
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">
+                        Last Updated
+                    </th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-dark-border">
+                {% for crate_item in crates %}
+                <tr class="hover:bg-dark-bg transition-colors">
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        <a href="/crates/{{ crate_item.name }}" class="text-blue-400 hover:text-blue-300 font-medium">
+                            {{ crate_item.name }}
+                        </a>
+                        {% if let Some(desc) = crate_item.description.as_ref() %}
+                        <p class="text-sm text-gray-500 truncate max-w-md">{{ desc }}</p>
+                        {% endif %}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-400">
+                        {{ crate_item.download_count|format_downloads }}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        {% if crate_item.finding_count > 0 %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-900 text-red-200">
+                            {{ crate_item.finding_count }}
+                        </span>
+                        {% else %}
+                        <span class="text-gray-500">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                        {% match crate_item.max_severity.as_deref() %}
+                        {% when Some("high") %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-severity-high/20 text-severity-high">
+                            High
+                        </span>
+                        {% when Some("medium") %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-severity-medium/20 text-severity-medium">
+                            Medium
+                        </span>
+                        {% when Some("low") %}
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-severity-low/20 text-severity-low">
+                            Low
+                        </span>
+                        {% when _ %}
+                        <span class="text-gray-500">-</span>
+                        {% endmatch %}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {{ crate_item.updated_at|format_date }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
