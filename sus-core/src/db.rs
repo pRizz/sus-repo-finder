@@ -198,7 +198,7 @@ impl Database {
     /// * `page` - The page number (1-indexed)
     /// * `per_page` - Number of items per page
     /// * `sort` - Sort order: "recent" (most recently analyzed), "severity" (highest severity first),
-    ///            "downloads" (most downloads first), or default (updated_at DESC)
+    ///   "downloads" (most downloads first), or default (updated_at DESC)
     pub async fn get_crates_paginated_sorted(
         &self,
         page: u32,
@@ -1436,7 +1436,7 @@ impl Database {
                    crates_processed, crates_total, current_crate,
                    queue_position, errors_count, findings_count
             FROM crawler_state
-            ORDER BY started_at DESC
+            ORDER BY started_at DESC, id DESC
             LIMIT 1
             "#,
         )
@@ -1759,10 +1759,7 @@ mod tests {
             .await
             .expect("Failed to check");
 
-        assert!(
-            !is_analyzed,
-            "New version should not be marked as analyzed"
-        );
+        assert!(!is_analyzed, "New version should not be marked as analyzed");
     }
 
     /// Test is_version_analyzed returns true after marking as analyzed
@@ -1882,5 +1879,167 @@ mod tests {
                 .expect("Failed to check"),
             "New version should be analyzed after marking"
         );
+    }
+
+    /// Test creating a crawler run
+    #[tokio::test]
+    async fn test_create_crawler_run() {
+        let db = Database::new_with_init("sqlite::memory:")
+            .await
+            .expect("Failed to create database");
+
+        let run_id = "test-run-001";
+        let crates_total = 50;
+
+        let id = db
+            .create_crawler_run(run_id, crates_total)
+            .await
+            .expect("Failed to create crawler run");
+
+        assert!(id > 0, "Should return positive ID");
+
+        // Verify the run was created
+        let state = db
+            .get_crawler_state(run_id)
+            .await
+            .expect("Failed to get state")
+            .expect("State should exist");
+
+        assert_eq!(state.run_id, run_id);
+        assert_eq!(state.status, "running");
+        assert_eq!(state.crates_processed, 0);
+        assert_eq!(state.crates_total, crates_total);
+        assert_eq!(state.queue_position, 0);
+    }
+
+    /// Test updating crawler checkpoint
+    #[tokio::test]
+    async fn test_update_crawler_checkpoint() {
+        let db = Database::new_with_init("sqlite::memory:")
+            .await
+            .expect("Failed to create database");
+
+        let run_id = "test-run-002";
+        db.create_crawler_run(run_id, 100)
+            .await
+            .expect("Failed to create run");
+
+        // Update checkpoint with progress
+        db.update_crawler_checkpoint(run_id, 10, Some("serde"), 5, 1, 3)
+            .await
+            .expect("Failed to update checkpoint");
+
+        let state = db
+            .get_crawler_state(run_id)
+            .await
+            .expect("Failed to get state")
+            .expect("State should exist");
+
+        assert_eq!(state.crates_processed, 10);
+        assert_eq!(state.current_crate, Some("serde".to_string()));
+        assert_eq!(state.queue_position, 5);
+        assert_eq!(state.errors_count, 1);
+        assert_eq!(state.findings_count, 3);
+        assert!(
+            state.last_checkpoint.is_some(),
+            "Checkpoint should be recorded"
+        );
+    }
+
+    /// Test completing a crawler run
+    #[tokio::test]
+    async fn test_complete_crawler_run() {
+        let db = Database::new_with_init("sqlite::memory:")
+            .await
+            .expect("Failed to create database");
+
+        let run_id = "test-run-003";
+        db.create_crawler_run(run_id, 50)
+            .await
+            .expect("Failed to create run");
+
+        // Complete the run
+        db.complete_crawler_run(run_id)
+            .await
+            .expect("Failed to complete run");
+
+        let state = db
+            .get_crawler_state(run_id)
+            .await
+            .expect("Failed to get state")
+            .expect("State should exist");
+
+        assert_eq!(state.status, "completed");
+    }
+
+    /// Test getting the latest crawler state
+    #[tokio::test]
+    async fn test_get_latest_crawler_state() {
+        let db = Database::new_with_init("sqlite::memory:")
+            .await
+            .expect("Failed to create database");
+
+        // Initially no state
+        let no_state = db
+            .get_latest_crawler_state()
+            .await
+            .expect("Failed to get latest");
+        assert!(no_state.is_none(), "Should be no state initially");
+
+        // Create a run
+        db.create_crawler_run("run-1", 10)
+            .await
+            .expect("Failed to create run 1");
+
+        // Should now have a state
+        let latest = db
+            .get_latest_crawler_state()
+            .await
+            .expect("Failed to get latest")
+            .expect("Should have a state");
+
+        assert_eq!(latest.run_id, "run-1");
+        assert_eq!(latest.crates_total, 10);
+        assert_eq!(latest.status, "running");
+    }
+
+    /// Test getting incomplete crawler runs
+    #[tokio::test]
+    async fn test_get_incomplete_crawler_runs() {
+        let db = Database::new_with_init("sqlite::memory:")
+            .await
+            .expect("Failed to create database");
+
+        // Create three runs with different statuses
+        db.create_crawler_run("run-running", 10)
+            .await
+            .expect("Failed to create running run");
+
+        db.create_crawler_run("run-completed", 20)
+            .await
+            .expect("Failed to create completed run");
+        db.complete_crawler_run("run-completed")
+            .await
+            .expect("Failed to complete run");
+
+        db.create_crawler_run("run-crashed", 30)
+            .await
+            .expect("Failed to create crashed run");
+        db.mark_crawler_crashed("run-crashed")
+            .await
+            .expect("Failed to mark crashed");
+
+        // Get incomplete runs (should be running and crashed)
+        let incomplete = db
+            .get_incomplete_crawler_runs()
+            .await
+            .expect("Failed to get incomplete runs");
+
+        assert_eq!(incomplete.len(), 2, "Should have 2 incomplete runs");
+
+        let run_ids: Vec<_> = incomplete.iter().map(|s| s.run_id.as_str()).collect();
+        assert!(run_ids.contains(&"run-running"));
+        assert!(run_ids.contains(&"run-crashed"));
+        assert!(!run_ids.contains(&"run-completed"));
     }
 }

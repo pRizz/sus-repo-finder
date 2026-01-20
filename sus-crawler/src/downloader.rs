@@ -49,10 +49,7 @@ impl RateLimitError for DownloadError {
 
     /// Returns true if this error is transient and can be retried
     fn is_transient(&self) -> bool {
-        matches!(
-            self,
-            DownloadError::RateLimited | DownloadError::Request(_)
-        )
+        matches!(self, DownloadError::RateLimited | DownloadError::Request(_))
     }
 }
 

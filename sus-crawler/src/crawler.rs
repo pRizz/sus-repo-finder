@@ -277,37 +277,29 @@ impl Crawler {
 
         // Step 1: Fetch metadata from crates.io with retry/backoff for rate limiting
         let fetch_name = name.clone();
-        let metadata: CrateMetadata = match retry_with_backoff(
-            &retry_config,
-            &format!("fetch_metadata:{}", name),
-            || {
+        let metadata: CrateMetadata =
+            match retry_with_backoff(&retry_config, &format!("fetch_metadata:{}", name), || {
                 let client = Arc::clone(&client);
                 let crate_name = fetch_name.clone();
-                async move {
-                    client
-                        .get_crate(&crate_name)
-                        .await
-                        .map(CrateMetadata::from)
+                async move { client.get_crate(&crate_name).await.map(CrateMetadata::from) }
+            })
+            .await
+            .into_result()
+            {
+                Ok(metadata) => metadata,
+                Err(e) => {
+                    error!("Failed to fetch metadata for {}: {}", name, e);
+                    return CrateProcessResult {
+                        name,
+                        version: String::new(),
+                        success: false,
+                        error: Some(format!("Failed to fetch metadata: {}", e)),
+                        crate_id: None,
+                        version_id: None,
+                        skipped: false,
+                    };
                 }
-            },
-        )
-        .await
-        .into_result()
-        {
-            Ok(metadata) => metadata,
-            Err(e) => {
-                error!("Failed to fetch metadata for {}: {}", name, e);
-                return CrateProcessResult {
-                    name,
-                    version: String::new(),
-                    success: false,
-                    error: Some(format!("Failed to fetch metadata: {}", e)),
-                    crate_id: None,
-                    version_id: None,
-                    skipped: false,
-                };
-            }
-        };
+            };
 
         let version = metadata.max_version.clone();
 

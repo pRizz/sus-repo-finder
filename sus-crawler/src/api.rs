@@ -20,7 +20,9 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
-use crate::templates::{DetailedTemplate, ErrorDisplay, ErrorsTemplate, QueueItemDisplay, StatusTemplate};
+use crate::templates::{
+    DetailedTemplate, ErrorDisplay, ErrorsTemplate, QueueItemDisplay, StatusTemplate,
+};
 use sus_crawler::{CrateDownloader, CratesIoClient, Crawler, CrawlerConfig};
 use sus_detector::Detector;
 
@@ -159,10 +161,7 @@ pub fn create_router(db: Database) -> Router {
             axum::routing::post(add_bulk_to_queue),
         )
         // Error tracking endpoint
-        .route(
-            "/api/crawler/store-error",
-            axum::routing::post(store_error),
-        )
+        .route("/api/crawler/store-error", axum::routing::post(store_error))
         // Checkpoint system endpoints
         .route(
             "/api/crawler/run/create",
@@ -191,9 +190,9 @@ async fn index(
 
     // Fetch the currently in-progress crate (if any)
     let in_progress_item = state.db.get_in_progress_queue_item().await.ok().flatten();
-    let current_crate = in_progress_item.as_ref().map(|item| {
-        format!("{} v{}", item.crate_name, item.version)
-    });
+    let current_crate = in_progress_item
+        .as_ref()
+        .map(|item| format!("{} v{}", item.crate_name, item.version));
 
     // Determine status based on whether there's processing happening
     let status = if in_progress_item.is_some() {
@@ -289,9 +288,18 @@ async fn errors(
         .collect();
 
     // Count errors by type
-    let download_failed_count = errors.iter().filter(|e| e.error_type == "download_failed").count() as i64;
-    let parse_error_count = errors.iter().filter(|e| e.error_type == "parse_error").count() as i64;
-    let analysis_failed_count = errors.iter().filter(|e| e.error_type == "analysis_failed").count() as i64;
+    let download_failed_count = errors
+        .iter()
+        .filter(|e| e.error_type == "download_failed")
+        .count() as i64;
+    let parse_error_count = errors
+        .iter()
+        .filter(|e| e.error_type == "parse_error")
+        .count() as i64;
+    let analysis_failed_count = errors
+        .iter()
+        .filter(|e| e.error_type == "analysis_failed")
+        .count() as i64;
 
     let template = ErrorsTemplate::new(
         "idle",

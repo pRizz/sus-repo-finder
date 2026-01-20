@@ -38,10 +38,7 @@ impl RateLimitError for CratesIoError {
 
     /// Returns true if this error is transient and can be retried
     fn is_transient(&self) -> bool {
-        matches!(
-            self,
-            CratesIoError::RateLimited | CratesIoError::Request(_)
-        )
+        matches!(self, CratesIoError::RateLimited | CratesIoError::Request(_))
     }
 }
 

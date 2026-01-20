@@ -65,6 +65,7 @@ pub struct StatusTemplate {
 
 impl StatusTemplate {
     /// Create a new status template with the given values
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         status: &str,
         crates_scanned: i64,

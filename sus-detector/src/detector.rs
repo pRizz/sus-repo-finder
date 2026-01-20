@@ -2535,7 +2535,7 @@ impl<'a> ObfuscationVisitor<'a> {
         // Base64 strings are typically multiples of 4 and contain only valid characters
         let base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
         let valid_chars = s.chars().all(|c| base64_chars.contains(c));
-        let reasonable_length = s.len() >= 24 && s.len() % 4 == 0;
+        let reasonable_length = s.len() >= 24 && s.len().is_multiple_of(4);
         valid_chars && reasonable_length
     }
 
@@ -2547,7 +2547,7 @@ impl<'a> ObfuscationVisitor<'a> {
         // Hex strings are even length and contain only hex characters
         let hex_chars = "0123456789abcdefABCDEF";
         let valid_chars = s.chars().all(|c| hex_chars.contains(c));
-        let even_length = s.len() % 2 == 0;
+        let even_length = s.len().is_multiple_of(2);
         valid_chars && even_length && s.len() >= 32
     }
 

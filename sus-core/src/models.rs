@@ -240,3 +240,44 @@ pub struct CrawlerErrorRow {
     pub occurred_at: String,
     pub retry_count: i32,
 }
+
+/// A crawler state row from the database
+/// Note: Uses String for timestamps because SQLite returns TEXT format
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CrawlerStateRow {
+    pub id: i64,
+    pub run_id: String,
+    pub status: String,
+    pub started_at: String,
+    pub last_checkpoint: Option<String>,
+    pub crates_processed: i32,
+    pub crates_total: i32,
+    pub current_crate: Option<String>,
+    pub queue_position: i32,
+    pub errors_count: i32,
+    pub findings_count: i32,
+}
+
+impl From<CrawlerStateRow> for CrawlerState {
+    fn from(row: CrawlerStateRow) -> Self {
+        CrawlerState {
+            id: row.id,
+            run_id: row.run_id,
+            status: row.status,
+            started_at: chrono::NaiveDateTime::parse_from_str(&row.started_at, "%Y-%m-%d %H:%M:%S")
+                .map(|dt| dt.and_utc())
+                .unwrap_or_else(|_| Utc::now()),
+            last_checkpoint: row.last_checkpoint.and_then(|s| {
+                chrono::NaiveDateTime::parse_from_str(&s, "%Y-%m-%d %H:%M:%S")
+                    .map(|dt| dt.and_utc())
+                    .ok()
+            }),
+            crates_processed: row.crates_processed,
+            crates_total: row.crates_total,
+            current_crate: row.current_crate,
+            queue_position: row.queue_position,
+            errors_count: row.errors_count,
+            findings_count: row.findings_count,
+        }
+    }
+}
