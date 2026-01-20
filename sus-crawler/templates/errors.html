@@ -4,7 +4,7 @@
 
 {% block nav_errors %}bg-dark-border{% endblock %}
 
-{% block status_color %}bg-gray-500{% endblock %}
+{% block status_color %}{% if status == "running" %}bg-success{% else if status == "paused" %}bg-severity-medium{% else %}bg-gray-500{% endif %}{% endblock %}
 {% block status_text %}{{ status_display }}{% endblock %}
 
 {% block content %}

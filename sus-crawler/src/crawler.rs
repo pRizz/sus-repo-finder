@@ -49,6 +49,8 @@ pub struct CrateProcessResult {
     pub crate_id: Option<i64>,
     /// Database ID of the stored version
     pub version_id: Option<i64>,
+    /// Whether the crate was skipped because it was already analyzed
+    pub skipped: bool,
 }
 
 /// Configuration for the crawler
@@ -261,6 +263,8 @@ impl Crawler {
     /// Process a single crate: fetch metadata, download, and store
     ///
     /// Uses exponential backoff retry for rate limiting (429) errors.
+    /// Implements incremental crawling: skips crate versions that have already
+    /// been analyzed (have last_analyzed timestamp with status 'completed').
     #[instrument(skip(db, client, downloader, retry_config), fields(crate_name = %name))]
     async fn process_single_crate(
         db: Arc<Database>,
@@ -300,11 +304,40 @@ impl Crawler {
                     error: Some(format!("Failed to fetch metadata: {}", e)),
                     crate_id: None,
                     version_id: None,
+                    skipped: false,
                 };
             }
         };
 
         let version = metadata.max_version.clone();
+
+        // Step 1.5: Check if this version has already been analyzed (incremental crawling)
+        match db.is_version_analyzed(&name, &version).await {
+            Ok(true) => {
+                info!(
+                    "Skipping {}@{}: already analyzed (incremental crawling)",
+                    name, version
+                );
+                return CrateProcessResult {
+                    name,
+                    version,
+                    success: true,
+                    error: None,
+                    crate_id: None,
+                    version_id: None,
+                    skipped: true,
+                };
+            }
+            Ok(false) => {
+                debug!("{}@{} has not been analyzed yet, proceeding", name, version);
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to check if {}@{} is already analyzed: {} - proceeding with analysis",
+                    name, version, e
+                );
+            }
+        }
 
         // Step 2: Download and extract the latest version with retry/backoff for rate limiting
         let download_name = name.clone();
@@ -357,6 +390,7 @@ impl Crawler {
                     error: Some(format!("Failed to store crate: {}", e)),
                     crate_id: None,
                     version_id: None,
+                    skipped: false,
                 };
             }
         };
@@ -373,6 +407,16 @@ impl Crawler {
             }
         };
 
+        // Step 5: Mark the version as analyzed (for incremental crawling)
+        if version_id > 0 {
+            if let Err(e) = db.mark_version_analyzed(version_id).await {
+                warn!(
+                    "Failed to mark {}@{} as analyzed: {} - will be re-analyzed next time",
+                    name, version, e
+                );
+            }
+        }
+
         info!(
             "Successfully processed {}@{}: crate_id={}, version_id={}",
             name, version, crate_id, version_id
@@ -385,6 +429,7 @@ impl Crawler {
             error: None,
             crate_id: Some(crate_id),
             version_id: Some(version_id),
+            skipped: false,
         }
     }
 
@@ -457,9 +502,11 @@ mod tests {
             error: None,
             crate_id: Some(1),
             version_id: Some(1),
+            skipped: false,
         };
         assert!(result.success);
         assert!(result.error.is_none());
+        assert!(!result.skipped);
     }
 
     #[test]
@@ -471,8 +518,26 @@ mod tests {
             error: Some("Test error".to_string()),
             crate_id: None,
             version_id: None,
+            skipped: false,
         };
         assert!(!result.success);
         assert!(result.error.is_some());
+        assert!(!result.skipped);
+    }
+
+    #[test]
+    fn test_crate_process_result_skipped() {
+        let result = CrateProcessResult {
+            name: "test".to_string(),
+            version: "1.0.0".to_string(),
+            success: true,
+            error: None,
+            crate_id: None,
+            version_id: None,
+            skipped: true,
+        };
+        assert!(result.success);
+        assert!(result.error.is_none());
+        assert!(result.skipped);
     }
 }

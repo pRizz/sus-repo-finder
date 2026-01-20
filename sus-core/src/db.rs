@@ -641,6 +641,65 @@ impl Database {
         Ok(result.map(|(id,)| id))
     }
 
+    /// Check if a crate version has already been analyzed
+    ///
+    /// Returns true if the version exists and has a non-null last_analyzed timestamp
+    /// with analysis_status = 'completed'. This is used for incremental crawling
+    /// to skip re-analyzing unchanged versions.
+    ///
+    /// # Arguments
+    /// * `crate_name` - The name of the crate
+    /// * `version_number` - The version number to check
+    pub async fn is_version_analyzed(
+        &self,
+        crate_name: &str,
+        version_number: &str,
+    ) -> Result<bool, sqlx::Error> {
+        let result: Option<(i32,)> = sqlx::query_as(
+            r#"
+            SELECT 1
+            FROM versions v
+            JOIN crates c ON v.crate_id = c.id
+            WHERE c.name = ?
+              AND v.version_number = ?
+              AND v.last_analyzed IS NOT NULL
+              AND v.analysis_status = 'completed'
+            "#,
+        )
+        .bind(crate_name)
+        .bind(version_number)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(result.is_some())
+    }
+
+    /// Mark a version as analyzed
+    ///
+    /// Updates the version's last_analyzed timestamp to the current time
+    /// and sets analysis_status to 'completed'. Call this after successfully
+    /// analyzing a crate version.
+    ///
+    /// # Arguments
+    /// * `version_id` - The ID of the version to mark as analyzed
+    #[instrument(skip(self))]
+    pub async fn mark_version_analyzed(&self, version_id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE versions
+            SET last_analyzed = CURRENT_TIMESTAMP,
+                analysis_status = 'completed'
+            WHERE id = ?
+            "#,
+        )
+        .bind(version_id)
+        .execute(&self.pool)
+        .await?;
+
+        info!("Marked version {} as analyzed", version_id);
+        Ok(())
+    }
+
     /// Insert an analysis result (finding) into the database
     ///
     /// Returns the ID of the inserted record.
@@ -940,6 +999,36 @@ impl Database {
         Ok(count)
     }
 
+    /// Get the total count of all queue items (pending, in_progress, completed, failed)
+    ///
+    /// This is useful for calculating overall progress percentage.
+    pub async fn get_total_queue_count(&self) -> Result<i64, sqlx::Error> {
+        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM crawler_queue")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count.0)
+    }
+
+    /// Get the count of completed queue items
+    ///
+    /// This combined with total count allows calculating progress percentage.
+    pub async fn get_completed_queue_count(&self) -> Result<i64, sqlx::Error> {
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM crawler_queue WHERE status = 'completed'")
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(count.0)
+    }
+
+    /// Get the count of in-progress queue items
+    pub async fn get_in_progress_queue_count(&self) -> Result<i64, sqlx::Error> {
+        let count: (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM crawler_queue WHERE status = 'in_progress'")
+                .fetch_one(&self.pool)
+                .await?;
+        Ok(count.0)
+    }
+
     // ==================== Crawler Error Tracking ====================
 
     /// Insert a crawler error into the database
@@ -1183,6 +1272,225 @@ impl Database {
 
         Ok(result)
     }
+
+    // =========================================================================
+    // Crawler State Management (Checkpoint System)
+    // =========================================================================
+
+    /// Create a new crawler run in the database
+    ///
+    /// This inserts a new record into crawler_state with initial values.
+    /// The returned ID can be used to update the run status as processing progresses.
+    ///
+    /// # Arguments
+    /// * `run_id` - Unique identifier for this crawler run
+    /// * `crates_total` - Total number of crates to be processed
+    ///
+    /// # Returns
+    /// The database ID of the created crawler run record
+    pub async fn create_crawler_run(
+        &self,
+        run_id: &str,
+        crates_total: i32,
+    ) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO crawler_state (run_id, status, started_at, crates_processed, crates_total, queue_position, errors_count, findings_count)
+            VALUES (?, 'running', datetime('now'), 0, ?, 0, 0, 0)
+            "#,
+        )
+        .bind(run_id)
+        .bind(crates_total)
+        .execute(&self.pool)
+        .await?;
+
+        let id = result.last_insert_rowid();
+        info!(
+            "Created crawler run id={} run_id={} total_crates={}",
+            id, run_id, crates_total
+        );
+        Ok(id)
+    }
+
+    /// Update the checkpoint data for an active crawler run
+    ///
+    /// This updates the progress fields for a running crawler, allowing
+    /// the run to be resumed from this checkpoint if interrupted.
+    ///
+    /// # Arguments
+    /// * `run_id` - The unique identifier of the crawler run
+    /// * `crates_processed` - Number of crates processed so far
+    /// * `current_crate` - The crate currently being processed (if any)
+    /// * `queue_position` - Current position in the processing queue
+    /// * `errors_count` - Number of errors encountered so far
+    /// * `findings_count` - Number of findings discovered so far
+    pub async fn update_crawler_checkpoint(
+        &self,
+        run_id: &str,
+        crates_processed: i32,
+        current_crate: Option<&str>,
+        queue_position: i32,
+        errors_count: i32,
+        findings_count: i32,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE crawler_state
+            SET crates_processed = ?,
+                current_crate = ?,
+                queue_position = ?,
+                errors_count = ?,
+                findings_count = ?,
+                last_checkpoint = datetime('now')
+            WHERE run_id = ?
+            "#,
+        )
+        .bind(crates_processed)
+        .bind(current_crate)
+        .bind(queue_position)
+        .bind(errors_count)
+        .bind(findings_count)
+        .bind(run_id)
+        .execute(&self.pool)
+        .await?;
+
+        info!(
+            "Updated checkpoint for run_id={}: processed={}, current={:?}, queue_pos={}",
+            run_id, crates_processed, current_crate, queue_position
+        );
+        Ok(())
+    }
+
+    /// Mark a crawler run as completed
+    ///
+    /// # Arguments
+    /// * `run_id` - The unique identifier of the crawler run
+    pub async fn complete_crawler_run(&self, run_id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE crawler_state
+            SET status = 'completed',
+                last_checkpoint = datetime('now')
+            WHERE run_id = ?
+            "#,
+        )
+        .bind(run_id)
+        .execute(&self.pool)
+        .await?;
+
+        info!("Completed crawler run_id={}", run_id);
+        Ok(())
+    }
+
+    /// Mark a crawler run as paused
+    ///
+    /// # Arguments
+    /// * `run_id` - The unique identifier of the crawler run
+    pub async fn pause_crawler_run(&self, run_id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE crawler_state
+            SET status = 'paused',
+                last_checkpoint = datetime('now')
+            WHERE run_id = ?
+            "#,
+        )
+        .bind(run_id)
+        .execute(&self.pool)
+        .await?;
+
+        info!("Paused crawler run_id={}", run_id);
+        Ok(())
+    }
+
+    /// Mark a crawler run as crashed (for detecting incomplete runs on startup)
+    ///
+    /// # Arguments
+    /// * `run_id` - The unique identifier of the crawler run
+    pub async fn mark_crawler_crashed(&self, run_id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE crawler_state
+            SET status = 'crashed',
+                last_checkpoint = datetime('now')
+            WHERE run_id = ?
+            "#,
+        )
+        .bind(run_id)
+        .execute(&self.pool)
+        .await?;
+
+        info!("Marked crawler run_id={} as crashed", run_id);
+        Ok(())
+    }
+
+    /// Get the latest crawler state (most recent run)
+    ///
+    /// Returns the most recently started crawler run.
+    pub async fn get_latest_crawler_state(
+        &self,
+    ) -> Result<Option<crate::models::CrawlerState>, sqlx::Error> {
+        let state = sqlx::query_as::<_, crate::models::CrawlerStateRow>(
+            r#"
+            SELECT id, run_id, status, started_at, last_checkpoint,
+                   crates_processed, crates_total, current_crate,
+                   queue_position, errors_count, findings_count
+            FROM crawler_state
+            ORDER BY started_at DESC
+            LIMIT 1
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(state.map(|s| s.into()))
+    }
+
+    /// Get a crawler state by run_id
+    ///
+    /// # Arguments
+    /// * `run_id` - The unique identifier of the crawler run
+    pub async fn get_crawler_state(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<crate::models::CrawlerState>, sqlx::Error> {
+        let state = sqlx::query_as::<_, crate::models::CrawlerStateRow>(
+            r#"
+            SELECT id, run_id, status, started_at, last_checkpoint,
+                   crates_processed, crates_total, current_crate,
+                   queue_position, errors_count, findings_count
+            FROM crawler_state
+            WHERE run_id = ?
+            "#,
+        )
+        .bind(run_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(state.map(|s| s.into()))
+    }
+
+    /// Find any running or crashed crawler runs (for recovery)
+    ///
+    /// Returns runs that were not properly completed.
+    pub async fn get_incomplete_crawler_runs(
+        &self,
+    ) -> Result<Vec<crate::models::CrawlerState>, sqlx::Error> {
+        let states = sqlx::query_as::<_, crate::models::CrawlerStateRow>(
+            r#"
+            SELECT id, run_id, status, started_at, last_checkpoint,
+                   crates_processed, crates_total, current_crate,
+                   queue_position, errors_count, findings_count
+            FROM crawler_state
+            WHERE status IN ('running', 'crashed')
+            ORDER BY started_at DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(states.into_iter().map(|s| s.into()).collect())
+    }
 }
 
 #[cfg(test)]
@@ -1425,5 +1733,154 @@ mod tests {
                 index_name
             );
         }
+    }
+
+    /// Test is_version_analyzed returns false for new/unanalyzed versions
+    #[tokio::test]
+    async fn test_is_version_analyzed_returns_false_for_new_version() {
+        let db = Database::new_with_init("sqlite::memory:")
+            .await
+            .expect("Failed to create database");
+
+        // Create a crate and version
+        let crate_id = db
+            .upsert_crate("test-crate", None, None, 100)
+            .await
+            .expect("Failed to create crate");
+
+        let _version_id = db
+            .upsert_version(crate_id, "1.0.0", false, false)
+            .await
+            .expect("Failed to create version");
+
+        // Should return false for unanalyzed version
+        let is_analyzed = db
+            .is_version_analyzed("test-crate", "1.0.0")
+            .await
+            .expect("Failed to check");
+
+        assert!(
+            !is_analyzed,
+            "New version should not be marked as analyzed"
+        );
+    }
+
+    /// Test is_version_analyzed returns true after marking as analyzed
+    #[tokio::test]
+    async fn test_is_version_analyzed_returns_true_after_marking() {
+        let db = Database::new_with_init("sqlite::memory:")
+            .await
+            .expect("Failed to create database");
+
+        // Create a crate and version
+        let crate_id = db
+            .upsert_crate("test-crate", None, None, 100)
+            .await
+            .expect("Failed to create crate");
+
+        let version_id = db
+            .upsert_version(crate_id, "1.0.0", false, false)
+            .await
+            .expect("Failed to create version");
+
+        // Mark as analyzed
+        db.mark_version_analyzed(version_id)
+            .await
+            .expect("Failed to mark as analyzed");
+
+        // Should return true now
+        let is_analyzed = db
+            .is_version_analyzed("test-crate", "1.0.0")
+            .await
+            .expect("Failed to check");
+
+        assert!(
+            is_analyzed,
+            "Version should be marked as analyzed after mark_version_analyzed"
+        );
+    }
+
+    /// Test is_version_analyzed returns false for non-existent version
+    #[tokio::test]
+    async fn test_is_version_analyzed_returns_false_for_nonexistent() {
+        let db = Database::new_with_init("sqlite::memory:")
+            .await
+            .expect("Failed to create database");
+
+        // Should return false for non-existent version
+        let is_analyzed = db
+            .is_version_analyzed("nonexistent-crate", "1.0.0")
+            .await
+            .expect("Failed to check");
+
+        assert!(
+            !is_analyzed,
+            "Non-existent version should not be marked as analyzed"
+        );
+    }
+
+    /// Test incremental crawling: analyzed versions are identified correctly
+    #[tokio::test]
+    async fn test_incremental_crawling_workflow() {
+        let db = Database::new_with_init("sqlite::memory:")
+            .await
+            .expect("Failed to create database");
+
+        // Simulate first crawl: create crate and version
+        let crate_id = db
+            .upsert_crate("my-crate", None, Some("A test crate"), 500)
+            .await
+            .expect("Failed to create crate");
+
+        let version_id = db
+            .upsert_version(crate_id, "2.0.0", true, false)
+            .await
+            .expect("Failed to create version");
+
+        // Before analysis: should not be analyzed
+        assert!(
+            !db.is_version_analyzed("my-crate", "2.0.0")
+                .await
+                .expect("Failed to check"),
+            "Version should not be analyzed before marking"
+        );
+
+        // Complete analysis and mark as analyzed
+        db.mark_version_analyzed(version_id)
+            .await
+            .expect("Failed to mark as analyzed");
+
+        // After analysis: should be analyzed
+        assert!(
+            db.is_version_analyzed("my-crate", "2.0.0")
+                .await
+                .expect("Failed to check"),
+            "Version should be analyzed after marking"
+        );
+
+        // New version should not be analyzed
+        let new_version_id = db
+            .upsert_version(crate_id, "2.1.0", true, false)
+            .await
+            .expect("Failed to create new version");
+
+        assert!(
+            !db.is_version_analyzed("my-crate", "2.1.0")
+                .await
+                .expect("Failed to check"),
+            "New version should not be analyzed"
+        );
+
+        // Mark new version as analyzed
+        db.mark_version_analyzed(new_version_id)
+            .await
+            .expect("Failed to mark new version as analyzed");
+
+        assert!(
+            db.is_version_analyzed("my-crate", "2.1.0")
+                .await
+                .expect("Failed to check"),
+            "New version should be analyzed after marking"
+        );
     }
 }
