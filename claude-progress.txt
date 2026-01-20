@@ -6353,3 +6353,66 @@ Feature PASSES - The application follows good accessibility practice by includin
 #### Current Completion Status:
 - Features passing: 90/170 (52.9%)
 - Feature #164 (Rate limit backoff works) - PASSING ✅
+[Testing] Feature #13 (Pattern detector identifies shell commands) verified - still passing
+[Testing] Session complete - verified feature #13 (no regression found)
+
+
+## Session: 2026-01-20 (Agent - Feature #65)
+
+### Feature #65: Crate list search filters results
+**Status: PASSING** ✅
+
+#### Feature Description:
+Search input filters crate names - verify that the search functionality on the crate list page correctly filters crates by name.
+
+#### Verification Steps:
+
+**Step 1: Verify test data exists** ✅
+- Database contains 500 total crates
+- 403 crates contain "test" in their name
+- 97 crates do NOT contain "test" (e.g., anyhow, actix-web, axum, bytes, clap, chrono)
+
+**Step 2: Load crate list** ✅
+- Navigated to http://localhost:3002/crates
+- Page shows "500 crates scanned"
+- All crates are displayed without any filter
+
+**Step 3: Search for 'test'** ✅
+- Typed "test" in search box and submitted
+- URL changed to http://localhost:3002/crates?search=test
+- Header changed to "Search Results for \"test\""
+- Page shows "Found 403 crates matching \"test\""
+
+**Step 4: Verify only matching crates shown** ✅
+- All visible crates in the results contain "test" in their name
+- test-crate-0001 through test-crate-0100 shown
+- latest-test-crate-*, fastest-test-*, async-test-* all appear
+
+**Step 5: Verify non-matching crates excluded** ✅
+- Database query confirms "anyhow" NOT in search results for "test"
+- Database query confirms actix-web, axum, bytes, clap, chrono all EXCLUDED
+- Search for "anyhow" shows exactly 1 result (proving it exists but is excluded from "test" search)
+
+**Additional Verification:**
+- "Clear search" link works correctly - returns to /crates with all 500 crates
+- Search preserves in pagination URLs (?page=2&per_page=10&search=test)
+- No console errors during search operations
+
+#### Test Evidence:
+- Screenshots:
+  - feature-65-step2-crate-list-before-search.png - Crate list before search (500 crates)
+  - feature-65-step3-search-results-test.png - Search results for "test" (403 crates)
+  - feature-65-step4-search-anyhow.png - Search for "anyhow" (1 crate)
+  - feature-65-step5-cleared-search.png - After clearing search (500 crates)
+- Database verification scripts: verify_search_exclusion.js, check_non_test_crates.js
+- Console errors: None
+
+#### Implementation Details:
+- Search form in base.html submits GET to /crates with ?search= parameter
+- Backend uses LIKE "%search_term%" in SQL query (search_crates_paginated in sus-core/src/db.rs)
+- count_crates_search provides accurate count for pagination
+- Template displays "Search Results for X" header and "Clear search" link when searching
+
+#### Current Completion Status:
+- Features passing: 92/170 (54.1%)
+- Feature #65 (Crate list search filters results) - PASSING ✅
