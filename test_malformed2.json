@@ -1,0 +1,4 @@
+{
+  "source": "struct MyStruct {\n    field1: i32,\n    field2: // missing type\n    field3:\n}\n\nimpl MyStruct {\n    fn method(&self {\n        // missing closing paren\n    }\n}\n\nfn broken_generics<T: 'a + where>() {}",
+  "file_path": "malformed_build2.rs"
+}

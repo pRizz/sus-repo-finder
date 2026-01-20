@@ -1,0 +1,13 @@
+{
+  "crate_name": "anyhow",
+  "version": "1.0.100",
+  "issue_type": "sensitive_path",
+  "severity": "high",
+  "file_path": "build.rs",
+  "line_start": 20,
+  "line_end": 20,
+  "code_snippet": "let secret = std::fs::read_to_string(\"/etc/passwd\");",
+  "context_before": "// Line 17 - Context before\n// Line 18 - Context before\n// Line 19 - Context before",
+  "context_after": "// Line 21 - Context after\n// Line 22 - Context after\n// Line 23 - Context after",
+  "summary": "CONTEXT TEST: Sensitive path access with 3 lines context before and after"
+}

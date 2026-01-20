@@ -1,0 +1,4 @@
+{
+  "source": "// Line 1 comment\n// Line 2 comment\n// Line 3 comment\n// Line 4 comment\n// Line 5 comment\n// Line 6 comment\n// Line 7 comment\n// Line 8 comment\n// Line 9 comment\n// Line 10 comment\n// Line 11 comment\n// Line 12 comment\n// Line 13 comment\n// Line 14 comment\n// Line 15 comment\n// Line 16 comment\n// Line 17 - This should be in context_before\n// Line 18 - This should be in context_before\n// Line 19 - This should be in context_before\nfn main() { let secret = std::fs::read_to_string(\"/etc/passwd\"); } // Line 20 - THE PATTERN\n// Line 21 - This should be in context_after\n// Line 22 - This should be in context_after\n// Line 23 - This should be in context_after\n// Line 24 comment\n// Line 25 comment\n// Line 26 comment\n// Line 27 comment\n// Line 28 comment\n// Line 29 comment\n// Line 30 comment",
+  "file_path": "build.rs"
+}

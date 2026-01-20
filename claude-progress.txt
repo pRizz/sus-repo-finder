@@ -3544,3 +3544,90 @@ SSE endpoint streams log messages - detailed view shows real-time logs without p
 #### Current Completion Status:
 - Features passing: 52/170 (30.6%)
 - Feature #46 (Crawler portal detailed view shows live logs) - PASSING ✅
+[Testing] 2026-01-19 19:47 - Regression test for Feature #46 (Crawler portal detailed view shows live logs)
+  - Step 1: Navigate to /detailed ✅
+    - Page loads with 'Live Logs' section
+    - SSE connection established (green 'Connected' indicator)
+  - Step 2: Start or resume crawler ✅
+    - Called /api/crawler/resume API
+    - Returned {"status":"running","success":true}
+  - Step 3: Verify log messages appear ✅
+    - SSE client connected message
+    - Heartbeat messages appearing periodically
+    - Crawler activity logged ('Crawler resume requested')
+  - Step 4: Verify messages update in real-time ✅
+    - New heartbeat messages appeared every ~15 seconds
+    - No manual intervention needed
+  - Step 5: Verify no page refresh needed ✅
+    - Page stayed on same URL throughout
+    - SSE streaming kept connection alive
+  - Screenshots:
+    - .playwright-mcp/.playwright-mcp/feature-46-regression-initial.png
+    - .playwright-mcp/.playwright-mcp/feature-46-regression-live-logs.png
+    - .playwright-mcp/.playwright-mcp/feature-46-regression-verified.png
+  - Console errors: Tailwind CDN warning only (cosmetic, expected in dev)
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #46 still passing
+
+## Session: 2026-01-20 (Agent - Feature #24)
+
+### Feature #24: Code snippet extraction includes context
+**Status: PASSING** ✅
+
+#### Feature Description:
+Captured code includes 3-5 lines before and after - ensures that when a suspicious pattern is detected, the code snippet includes surrounding context for better understanding.
+
+#### Verification Steps:
+
+**Step 1: Run detector on file with pattern at line 20** ✅
+- Created test source code with 30 lines
+- Pattern (sensitive path access) placed at line 20
+- Ran detector via /api/crawler/test-detector API
+- Received 3 findings (file_access x2, sensitive_path x1)
+
+**Step 2: Verify context_before includes lines 17-19** ✅
+- context_before contains:
+  - "// Line 17 - This should be in context_before"
+  - "// Line 18 - This should be in context_before"
+  - "// Line 19 - This should be in context_before"
+- 3 context lines as expected
+
+**Step 3: Verify context_after includes lines 21-23** ✅
+- context_after contains:
+  - "// Line 21 - This should be in context_after"
+  - "// Line 22 - This should be in context_after"
+  - "// Line 23 - This should be in context_after"
+- 3 context lines as expected
+
+**Step 4: Verify main snippet is line 20** ✅
+- code_snippet contains the pattern line:
+  - "let secret = std::fs::read_to_string(\"/etc/passwd\");"
+- line_start: 20, line_end: 20 as expected
+
+#### Implementation Details:
+The `extract_snippet` function in `sus-detector/src/patterns.rs` correctly:
+- Takes source code, line_start, line_end, and context_lines parameters
+- Extracts `context_lines` (3) lines before the pattern
+- Extracts the main code snippet
+- Extracts `context_lines` (3) lines after the pattern
+- Returns a tuple of (context_before, snippet, context_after)
+
+#### UI Verification:
+- Created a test finding with context in the database
+- Dashboard correctly displays:
+  - context_before in gray text
+  - main snippet highlighted in yellow
+  - context_after in gray text
+- Screenshot: .playwright-mcp/.playwright-mcp/feature-24-context-displayed.png
+
+#### Test Evidence:
+- API test output: test_context_result.json
+- Verification script: parse_context_result.js
+- Screenshots:
+  - .playwright-mcp/.playwright-mcp/feature-24-crate-detail.png
+  - .playwright-mcp/.playwright-mcp/feature-24-context-displayed.png
+- Console errors: Tailwind CDN warning only (cosmetic)
+
+#### Current Completion Status:
+- Features passing: 51/170 (30.0%)
+- Feature #24 (Code snippet extraction includes context) - PASSING ✅

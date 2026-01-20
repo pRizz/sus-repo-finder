@@ -1,0 +1,4 @@
+{
+  "source": "fn main() {\n    use std::fs;\n    // Valid code with suspicious pattern\n    fs::read_to_string(\"/etc/passwd\");\n}",
+  "file_path": "valid_with_pattern.rs"
+}

@@ -1,0 +1,4 @@
+{
+  "source": "// Empty file with just comments is valid\n// But this has random invalid tokens:\n@@@ ### %%% !!!\nfn main() {}",
+  "file_path": "malformed_build3.rs"
+}

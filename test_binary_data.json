@@ -1,0 +1,4 @@
+{
+  "source": "\\x00\\x01\\x02\\x03 binary data that's not valid UTF-8 simulation \\xff\\xfe",
+  "file_path": "binary.rs"
+}

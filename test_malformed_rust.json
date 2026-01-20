@@ -1,0 +1,4 @@
+{
+  "source": "// Intentionally malformed Rust code with syntax errors\n\nfn main( {\n    let x = 5\n    println!(\"Hello, world!\"\n    let unclosed_string = \"this string doesn't end\n    // Missing closing braces everywhere\n    if true {\n        let y = ;\n    // Missing closing brace\n",
+  "file_path": "malformed_build.rs"
+}
