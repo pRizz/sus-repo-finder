@@ -44,20 +44,20 @@
         <!-- Crate Metadata -->
         <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
             <div>
-                <span class="text-gray-500">Downloads</span>
+                <span class="text-gray-400">Downloads</span>
                 <p class="text-gray-200 font-medium">{{ crate_info.download_count|format_downloads }}</p>
             </div>
             <div>
-                <span class="text-gray-500">Repository</span>
+                <span class="text-gray-400">Repository</span>
                 {% match crate_info.repo_url %}
                 {% when Some with (repo) %}
                 <p><a href="{{ repo }}" target="_blank" rel="noopener noreferrer" class="text-blue-400 hover:text-blue-300 transition-colors">{{ repo }}</a></p>
                 {% when None %}
-                <p class="text-gray-500">No repository linked</p>
+                <p class="text-gray-400">No repository linked</p>
                 {% endmatch %}
             </div>
             <div>
-                <span class="text-gray-500">Last Updated</span>
+                <span class="text-gray-400">Last Updated</span>
                 <p class="text-gray-200">{{ crate_info.updated_at|format_date }}</p>
             </div>
         </div>
@@ -133,7 +133,7 @@
                         </span>
                         {% endif %}
                     </div>
-                    <span class="text-sm text-gray-500">{{ finding.file_path }}{% match finding.line_start %}{% when Some with (line) %}:{{ line }}{% when None %}{% endmatch %}</span>
+                    <span class="text-sm text-gray-400">{{ finding.file_path }}{% match finding.line_start %}{% when Some with (line) %}:{{ line }}{% when None %}{% endmatch %}</span>
                 </div>
 
                 {% match finding.summary %}
@@ -159,9 +159,9 @@
                         {% when None %}
                         {% endmatch %}
                     </div>
-                    <pre class="p-4 overflow-x-auto text-sm"><code>{% match finding.context_before %}{% when Some with (ctx_before) %}<span class="text-gray-500">{{ ctx_before }}</span>
+                    <pre class="p-4 overflow-x-auto text-sm"><code>{% match finding.context_before %}{% when Some with (ctx_before) %}<span class="text-gray-400">{{ ctx_before }}</span>
 {% when None %}{% endmatch %}{% match finding.code_snippet %}{% when Some with (snippet) %}<span class="text-yellow-300">{{ snippet }}</span>{% when None %}{% endmatch %}{% match finding.context_after %}{% when Some with (ctx_after) %}
-<span class="text-gray-500">{{ ctx_after }}</span>{% when None %}{% endmatch %}</code></pre>
+<span class="text-gray-400">{{ ctx_after }}</span>{% when None %}{% endmatch %}</code></pre>
                 </div>
                 {% endif %}
             </div>
