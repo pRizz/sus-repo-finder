@@ -3631,3 +3631,89 @@ The `extract_snippet` function in `sus-detector/src/patterns.rs` correctly:
 #### Current Completion Status:
 - Features passing: 51/170 (30.0%)
 - Feature #24 (Code snippet extraction includes context) - PASSING ✅
+[Testing] 2026-01-20 - Regression test for Feature #2 (SQLite database initializes with schema)
+  - Step 1: Database initialization verified ✅
+    - Database exists at ./data/sus-repo-finder.db
+    - init.sh ran successfully
+  - Step 2: Verify crates table exists ✅
+    - API /api/crates returns 51 crates
+    - Dashboard shows 51 crates scanned
+  - Step 3: Verify versions table exists ✅
+    - Crate detail page shows version dropdown
+    - Multiple versions available (Latest, 0.9.99, 1.0.100)
+  - Step 4: Verify analysis_results table exists ✅
+    - Dashboard shows 6 total findings
+    - Crate detail pages show finding details with code snippets
+  - Step 5: Verify crawler_state table exists ✅
+    - /api/crawler/status returns valid JSON with status: idle
+  - Step 6: Verify crawler_errors table exists ✅
+    - /api/crawler/errors returns {"errors":[],"total":0}
+  - Step 7: Verify crawler_queue table exists ✅
+    - /api/crawler/queue returns {"items":[],"pending":0}
+  - UI Verification: Dashboard and all pages working correctly
+  - Screenshots:
+    - .playwright-mcp/feature-2-regression-crates-list.png
+    - .playwright-mcp/feature-2-regression-crate-detail.png
+    - .playwright-mcp/feature-2-regression-dashboard.png
+  - Console errors: None (favicon 404 only - cosmetic)
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #2 still passing
+
+## Session: 2026-01-20 (Agent - Feature #26)
+
+### Feature #26: AST parsing handles syntax errors gracefully
+**Status: PASSING**
+
+#### Feature Description:
+Malformed Rust code doesn't crash the analyzer - verify that the pattern detector gracefully handles syntax errors in Rust source code.
+
+#### Implementation Analysis:
+The detector already handles syntax errors gracefully at line 341-343 in sus-detector/src/detector.rs:
+- When syn::parse_file() fails, it logs a warning and returns an empty findings vector
+- No panic or crash occurs - the function returns gracefully
+
+#### Verification Steps:
+
+**Step 1: Create intentionally malformed Rust files**
+Created multiple test files with various syntax errors:
+- test_malformed_rust.json - Missing parens, unclosed strings, missing braces
+- test_malformed2.json - Struct with missing types, broken impl blocks
+- test_malformed3.json - Invalid tokens (@@@ ### %%%)
+- test_malformed4.json - Empty file
+- test_binary_data.json - Binary-like escape sequences
+- test_huge_nesting.json - Deeply nested braces
+
+**Step 2: Run detector on malformed code**
+Used /api/crawler/test-detector endpoint for each test case
+
+**Step 3: Verify appropriate response returned**
+All malformed files returned:
+- success: true
+- findings_count: 0
+- findings: []
+This is the correct behavior - graceful handling with empty results.
+
+**Step 4: Verify no panic or crash**
+- Both servers (crawler:3001, dashboard:3002) remained running after all tests
+- No JavaScript errors in browser console (except favicon 404)
+- Valid code with patterns correctly detects findings (tested with test_malformed5.json)
+
+#### Test Results:
+- test_malformed_rust.json: success: true, findings: 0 (Missing parens, braces)
+- test_malformed2.json: success: true, findings: 0 (Broken struct/impl)
+- test_malformed3.json: success: true, findings: 0 (Invalid tokens)
+- test_malformed4.json: success: true, findings: 0 (Empty file)
+- test_binary_data.json: success: true, findings: 0 (Binary-like data)
+- test_huge_nesting.json: success: true, findings: 0 (Deep nesting)
+- test_malformed5.json: success: true, findings: 4 (Valid code - patterns found)
+
+#### Test Evidence:
+- Screenshots:
+  - .playwright-mcp/.playwright-mcp/feature-26-crawler-portal-initial.png
+  - .playwright-mcp/.playwright-mcp/feature-26-dashboard-still-working.png
+- Console errors: favicon 404 only (cosmetic)
+- Servers verified running after tests
+
+#### Current Completion Status:
+- Features passing: 53/170 (31.2%)
+- Feature #26 (AST parsing handles syntax errors gracefully) - PASSING
