@@ -9,6 +9,12 @@
 //! The crawler implements rate limiting to be a polite citizen when
 //! accessing the crates.io API. Configure the delay between requests
 //! using `CrawlerConfig::rate_limit_delay_ms`.
+//!
+//! ## Retry with Exponential Backoff
+//!
+//! When the crates.io API returns a 429 (Too Many Requests) response,
+//! the crawler will automatically retry with exponential backoff.
+//! Configure retry behavior using `RetryConfig`.
 
 use futures::stream::{self, StreamExt};
 use std::sync::Arc;
@@ -19,6 +25,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::crates_io::{CrateMetadata, CratesIoClient};
 use crate::downloader::CrateDownloader;
+use crate::retry::{retry_with_backoff, RetryConfig};
 
 /// Default maximum concurrent crate processing
 const DEFAULT_MAX_CONCURRENT: usize = 10;
@@ -52,6 +59,8 @@ pub struct CrawlerConfig {
     /// Delay between API requests in milliseconds (rate limiting)
     /// This helps be a polite citizen when accessing crates.io
     pub rate_limit_delay_ms: u64,
+    /// Retry configuration for handling rate limiting (429 errors)
+    pub retry_config: RetryConfig,
 }
 
 impl Default for CrawlerConfig {
@@ -59,6 +68,7 @@ impl Default for CrawlerConfig {
         Self {
             max_concurrent: DEFAULT_MAX_CONCURRENT,
             rate_limit_delay_ms: DEFAULT_RATE_LIMIT_DELAY_MS,
+            retry_config: RetryConfig::default(),
         }
     }
 }
@@ -69,12 +79,19 @@ impl CrawlerConfig {
         Self {
             max_concurrent,
             rate_limit_delay_ms,
+            retry_config: RetryConfig::default(),
         }
     }
 
     /// Set the rate limit delay (builder pattern)
     pub fn with_rate_limit_delay_ms(mut self, delay_ms: u64) -> Self {
         self.rate_limit_delay_ms = delay_ms;
+        self
+    }
+
+    /// Set the retry configuration (builder pattern)
+    pub fn with_retry_config(mut self, retry_config: RetryConfig) -> Self {
+        self.retry_config = retry_config;
         self
     }
 }
@@ -200,6 +217,8 @@ impl Crawler {
             self.config.rate_limit_delay_ms
         );
 
+        let retry_config = Arc::new(self.config.retry_config.clone());
+
         let results: Vec<CrateProcessResult> = stream::iter(crate_names)
             .map(|name| {
                 let db = Arc::clone(&self.db);
@@ -207,6 +226,7 @@ impl Crawler {
                 let downloader = Arc::clone(&self.downloader);
                 let semaphore = Arc::clone(&self.semaphore);
                 let rate_limiter = Arc::clone(&self.rate_limiter);
+                let retry_config = Arc::clone(&retry_config);
 
                 async move {
                     // Acquire semaphore permit to limit concurrency
@@ -218,7 +238,7 @@ impl Crawler {
                         limiter.wait_and_record().await;
                     }
 
-                    Self::process_single_crate(db, client, downloader, name).await
+                    Self::process_single_crate(db, client, downloader, name, retry_config).await
                 }
             })
             .buffer_unordered(self.config.max_concurrent)
@@ -239,18 +259,38 @@ impl Crawler {
     }
 
     /// Process a single crate: fetch metadata, download, and store
-    #[instrument(skip(db, client, downloader), fields(crate_name = %name))]
+    ///
+    /// Uses exponential backoff retry for rate limiting (429) errors.
+    #[instrument(skip(db, client, downloader, retry_config), fields(crate_name = %name))]
     async fn process_single_crate(
         db: Arc<Database>,
         client: Arc<CratesIoClient>,
         downloader: Arc<CrateDownloader>,
         name: String,
+        retry_config: Arc<RetryConfig>,
     ) -> CrateProcessResult {
         info!("Processing crate: {}", name);
 
-        // Step 1: Fetch metadata from crates.io
-        let metadata: CrateMetadata = match client.get_crate(&name).await {
-            Ok(response) => response.into(),
+        // Step 1: Fetch metadata from crates.io with retry/backoff for rate limiting
+        let fetch_name = name.clone();
+        let metadata: CrateMetadata = match retry_with_backoff(
+            &retry_config,
+            &format!("fetch_metadata:{}", name),
+            || {
+                let client = Arc::clone(&client);
+                let crate_name = fetch_name.clone();
+                async move {
+                    client
+                        .get_crate(&crate_name)
+                        .await
+                        .map(CrateMetadata::from)
+                }
+            },
+        )
+        .await
+        .into_result()
+        {
+            Ok(metadata) => metadata,
             Err(e) => {
                 error!("Failed to fetch metadata for {}: {}", name, e);
                 return CrateProcessResult {
@@ -266,19 +306,36 @@ impl Crawler {
 
         let version = metadata.max_version.clone();
 
-        // Step 2: Download and extract the latest version
-        let (has_build_rs, is_proc_macro) =
-            match downloader.download_and_extract(&name, &version).await {
-                Ok(extracted) => (extracted.has_build_rs, extracted.is_proc_macro),
-                Err(e) => {
-                    warn!(
-                        "Failed to download {}@{}: {} - storing with defaults",
-                        name, version, e
-                    );
-                    // Continue with defaults if download fails
-                    (false, false)
+        // Step 2: Download and extract the latest version with retry/backoff for rate limiting
+        let download_name = name.clone();
+        let download_version = version.clone();
+        let (has_build_rs, is_proc_macro) = match retry_with_backoff(
+            &retry_config,
+            &format!("download:{}@{}", name, version),
+            || {
+                let downloader = Arc::clone(&downloader);
+                let crate_name = download_name.clone();
+                let crate_version = download_version.clone();
+                async move {
+                    downloader
+                        .download_and_extract(&crate_name, &crate_version)
+                        .await
                 }
-            };
+            },
+        )
+        .await
+        .into_result()
+        {
+            Ok(extracted) => (extracted.has_build_rs, extracted.is_proc_macro),
+            Err(e) => {
+                warn!(
+                    "Failed to download {}@{}: {} - storing with defaults",
+                    name, version, e
+                );
+                // Continue with defaults if download fails
+                (false, false)
+            }
+        };
 
         // Step 3: Store crate in database
         let crate_id = match db

@@ -6,7 +6,9 @@
 pub mod crates_io;
 pub mod crawler;
 pub mod downloader;
+pub mod retry;
 
 pub use crates_io::{CrateMetadata, CrateResponse, CratesIoClient, CratesIoError};
 pub use crawler::{CrateProcessResult, Crawler, CrawlerConfig};
 pub use downloader::{CrateDownloader, DownloadError, ExtractedCrate};
+pub use retry::{retry_with_backoff, RateLimitError, RetryConfig, RetryResult};

@@ -3,6 +3,7 @@
 //! This module provides functionality to download crate source tarballs from
 //! crates.io and extract them to a local directory for analysis.
 
+use crate::retry::RateLimitError;
 use flate2::read::GzDecoder;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -38,6 +39,21 @@ pub enum DownloadError {
 
     #[error("Invalid extraction path: {0}")]
     InvalidPath(String),
+}
+
+impl RateLimitError for DownloadError {
+    /// Returns true if this error indicates a rate limit (429 response)
+    fn is_rate_limited(&self) -> bool {
+        matches!(self, DownloadError::RateLimited)
+    }
+
+    /// Returns true if this error is transient and can be retried
+    fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            DownloadError::RateLimited | DownloadError::Request(_)
+        )
+    }
 }
 
 /// Result of a successful crate extraction

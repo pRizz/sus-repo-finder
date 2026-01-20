@@ -4,6 +4,7 @@
 //! to fetch information about crates, including names, versions, descriptions,
 //! download counts, and repository URLs.
 
+use crate::retry::RateLimitError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -27,6 +28,21 @@ pub enum CratesIoError {
 
     #[error("API returned error: {0}")]
     ApiError(String),
+}
+
+impl RateLimitError for CratesIoError {
+    /// Returns true if this error indicates a rate limit (429 response)
+    fn is_rate_limited(&self) -> bool {
+        matches!(self, CratesIoError::RateLimited)
+    }
+
+    /// Returns true if this error is transient and can be retried
+    fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            CratesIoError::RateLimited | CratesIoError::Request(_)
+        )
+    }
 }
 
 /// Response from the crates.io API for a single crate
