@@ -2267,3 +2267,79 @@ API errors follow a consistent format across all endpoints, returning proper HTT
 #### Current Completion Status:
 - Features passing: 33/170 (19.4%)
 - Feature #101 (API error returns JSON error response) - PASSING ✅
+[Testing] 2026-01-19 19:10 - Regression test for Feature #100 (404 page shown for invalid routes)
+  - Step 1: Navigated to /invalid/route/path ✅
+  - Step 2: 404 page displayed with correct elements (404 text, heading, message, sad face) ✅
+  - Step 3: 'Go to Homepage' link navigates to dashboard ✅
+  - Console errors: Expected 404 errors only (favicon, route)
+  - All 3 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #100 (404 page shown for invalid routes) still passing
+
+## Session: 2026-01-19 (Agent - Feature #118)
+
+### Feature #118: Color contrast meets WCAG AA
+**Status: PASSING** ✅
+
+#### Feature Description:
+Text has 4.5:1 contrast ratio as required by WCAG AA accessibility standards.
+
+#### Problem Found:
+- `text-gray-500` (#6b7280) on dark backgrounds failed WCAG AA:
+  - On #0d1117 (dark-bg): 3.91:1 ratio ❌
+  - On #161b22 (dark-surface): 3.58:1 ratio ❌
+- WCAG AA requires minimum 4.5:1 contrast ratio for normal text
+
+#### Solution Implemented:
+Changed all `text-gray-500` and `text-gray-600` classes to `text-gray-400`:
+- `text-gray-400` (#9ca3af) on dark backgrounds meets WCAG AA:
+  - On #0d1117 (dark-bg): 7.45:1 ratio ✅
+  - On #161b22 (dark-surface): 6.81:1 ratio ✅
+
+#### Files Modified:
+
+**Dashboard templates:**
+- sus-dashboard/templates/base.html: footer text, search placeholder
+- sus-dashboard/templates/landing.html: separator, empty state icon, version text, note paragraph
+- sus-dashboard/templates/crate_detail.html: all metadata labels and context text
+- sus-dashboard/templates/crate_list.html: description text, empty state, table cells
+- sus-dashboard/templates/not_found.html: icon and help text
+
+**Crawler templates:**
+- sus-crawler/templates/base.html: footer text
+- sus-crawler/templates/status.html: empty state icon and text
+
+#### Verification:
+1. ✅ Step 1: Checked text on dark backgrounds - found multiple text-gray-500/600 instances
+2. ✅ Step 2: Verified contrast ratios:
+   - text-gray-400 on dark-bg: 7.45:1 (exceeds 4.5:1 requirement)
+   - text-gray-400 on dark-surface: 6.81:1 (exceeds 4.5:1 requirement)
+3. ✅ Step 3: Checked multiple text colors - all secondary/muted text now uses gray-400
+
+#### Test Evidence:
+- Screenshots: .playwright-mcp/feature-118-wcag-contrast-verified.png
+- Contrast calculations verified via browser JavaScript
+- All templates updated and git diff confirms changes
+
+#### Commit:
+- f699add: Implement Feature #118: Color contrast meets WCAG AA (4.5:1)
+
+#### Current Completion Status:
+- Features passing: 36/170 (21.2%)
+- Feature #118 (Color contrast meets WCAG AA) - PASSING ✅
+[Testing] 2026-01-19 19:15 - Regression test for Feature #20 (Pattern detector identifies obfuscation)
+  - Step 1: Created test with base64::decode of suspicious string ✅
+    - Test file with 'use base64;' and 'base64::decode("SGVsbG8gV29ybGQ=")'
+    - Submitted to /api/crawler/test-detector endpoint
+  - Step 2: Ran detector ✅
+    - Response: success=true, findings_count=3
+  - Step 3: Verified obfuscation pattern detected ✅
+    - Finding 1: "Obfuscation-related import detected: base64" (high severity)
+    - Finding 2: "Obfuscation function call detected: base64::decode" (high severity)
+    - Finding 3: "Obfuscation type reference detected: base64::decode" (high severity)
+  - Also tested hex string detection - working correctly
+  - Console errors: favicon 404 only (cosmetic)
+  - All 3 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #20 (Pattern detector identifies obfuscation) still passing
+
