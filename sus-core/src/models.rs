@@ -147,3 +147,16 @@ pub struct AnalysisResultRow {
     pub details: Option<String>,
     pub created_at: String,
 }
+
+/// A version row from the database with finding count
+/// Note: Uses String for timestamps because SQLite returns TEXT format
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct VersionWithStats {
+    pub id: i64,
+    pub crate_id: i64,
+    pub version_number: String,
+    pub has_build_rs: bool,
+    pub is_proc_macro: bool,
+    pub last_analyzed: Option<String>,
+    pub finding_count: i64,
+}

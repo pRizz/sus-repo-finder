@@ -2,16 +2,17 @@
 
 use askama::Template;
 use axum::{
-    extract::State,
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Response},
     routing::get,
     Router,
 };
+use serde::Deserialize;
 use std::sync::Arc;
 use sus_core::Database;
 
-use crate::templates::{CrateListTemplate, LandingTemplate};
+use crate::templates::{CrateDetailTemplate, CrateListTemplate, LandingTemplate};
 
 /// Application state shared across handlers
 pub struct AppState {
@@ -110,8 +111,78 @@ async fn crate_list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     }
 }
 
-async fn crate_detail() -> &'static str {
-    "Sus Dashboard - Crate Detail (TODO: implement template)"
+/// Query parameters for crate detail page
+#[derive(Debug, Deserialize)]
+pub struct CrateDetailQuery {
+    pub version: Option<String>,
+}
+
+async fn crate_detail(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Query(query): Query<CrateDetailQuery>,
+) -> impl IntoResponse {
+    // Get crate info
+    let crate_result = state.db.get_crate_by_name(&name).await;
+
+    match crate_result {
+        Ok(Some(crate_info)) => {
+            // Get versions for this crate
+            let versions = state
+                .db
+                .get_versions_for_crate(crate_info.id)
+                .await
+                .unwrap_or_default();
+
+            // Determine which version to show findings for
+            let selected_version = query.version.clone();
+            let version_id = if let Some(ref ver_num) = selected_version {
+                // Find the version ID for the selected version
+                versions
+                    .iter()
+                    .find(|v| &v.version_number == ver_num)
+                    .map(|v| v.id)
+            } else {
+                // Default to the latest version (first in the list since sorted by id DESC)
+                versions.first().map(|v| v.id)
+            };
+
+            // Get findings for the selected version
+            let findings = if let Some(vid) = version_id {
+                state
+                    .db
+                    .get_findings_by_version(vid)
+                    .await
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+
+            HtmlTemplate(CrateDetailTemplate {
+                crate_info,
+                versions,
+                findings,
+                selected_version,
+            })
+            .into_response()
+        }
+        Ok(None) => {
+            // Crate not found
+            (
+                StatusCode::NOT_FOUND,
+                format!("Crate '{}' not found", name),
+            )
+                .into_response()
+        }
+        Err(err) => {
+            tracing::error!("Database error loading crate '{}': {}", name, err);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Database error: {}", err),
+            )
+                .into_response()
+        }
+    }
 }
 
 async fn crate_compare() -> &'static str {

@@ -448,6 +448,33 @@ impl Database {
             .await?;
         Ok(count.0)
     }
+
+    /// Get all versions for a crate with finding counts
+    pub async fn get_versions_for_crate(
+        &self,
+        crate_id: i64,
+    ) -> Result<Vec<crate::models::VersionWithStats>, sqlx::Error> {
+        let versions = sqlx::query_as::<_, crate::models::VersionWithStats>(
+            r#"
+            SELECT
+                v.id,
+                v.crate_id,
+                v.version_number,
+                v.has_build_rs,
+                v.is_proc_macro,
+                v.last_analyzed,
+                (SELECT COUNT(*) FROM analysis_results ar WHERE ar.version_id = v.id) as finding_count
+            FROM versions v
+            WHERE v.crate_id = ?
+            ORDER BY v.id DESC
+            "#,
+        )
+        .bind(crate_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(versions)
+    }
 }
 
 #[cfg(test)]
