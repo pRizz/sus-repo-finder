@@ -958,3 +958,64 @@ to make the changes take effect. The current running servers use older binaries.
 - Tests verify severity levels (Medium for file access)
 - Tests verify context extraction for findings
 
+
+## Session: 2026-01-20 (Agent - Feature #74)
+
+### Feature #74: Crate detail page loads
+**Status: PASSING**
+
+#### What was done:
+- Created CrateDetailTemplate struct in sus-dashboard/src/templates.rs
+- Created crate_detail.html template with:
+  - Crate header showing name, description, finding count badge, severity badge
+  - Metadata section with downloads (formatted), repo URL, last updated
+  - Findings/Version Comparison tabs (navigation)
+  - Version selector dropdown
+  - Findings list with:
+    - Issue type badges (blue)
+    - Severity badges (color-coded: red/orange/yellow)
+    - File path with line number
+    - Summary text
+    - Code snippets with context
+    - "View on GitHub" links
+  - Empty state with checkmark icon when no findings
+- Added VersionWithStats model to sus-core for version listing
+- Added get_versions_for_crate() database method to sus-core/src/db.rs
+- Implemented crate_detail handler in sus-dashboard/src/api.rs with:
+  - Version filtering via query parameter
+  - Proper 404 handling for non-existent crates
+  - Loading findings for selected version
+
+#### Files created/modified:
+- sus-dashboard/src/api.rs - Updated handler with full implementation
+- sus-dashboard/src/templates.rs - Added CrateDetailTemplate struct
+- sus-dashboard/templates/crate_detail.html - New template
+- sus-core/src/db.rs - Added get_versions_for_crate() method
+- sus-core/src/models.rs - Added VersionWithStats model
+
+#### Steps verified:
+1. ✅ Create crate with findings - Used existing 'anyhow' crate with 2 findings
+2. ✅ Navigate to /crates/anyhow - Page loads successfully
+3. ✅ Verify HTTP 200 - Confirmed
+4. ✅ Verify crate details displayed:
+   - Crate name: "anyhow"
+   - Description displayed
+   - Finding count badge: "2 findings"
+   - Severity badge: "Medium Severity"
+   - Downloads: "513.4M"
+   - Repository URL as clickable link
+   - Last updated date
+   - Version selector with "1.0.100 (2 findings)"
+   - Findings list with issue type and severity badges
+   - Code snippets with "View on GitHub" links
+
+#### Test evidence:
+- Screenshot saved: .playwright-mcp/feature-74-crate-detail-page.png
+- Tested empty state with 'tokio' crate (no findings) - shows checkmark icon
+- Tested 404 for non-existent crate - returns proper error message
+- No JavaScript errors in browser console
+
+#### Current Completion Status:
+- Features passing: 19/170 (11.2%)
+- Feature #74 (Crate detail page loads) - PASSING
+
