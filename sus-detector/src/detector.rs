@@ -6,7 +6,7 @@
 use crate::patterns::{default_severity, extract_snippet, Finding};
 use sus_core::IssueType;
 use syn::visit::Visit;
-use syn::{Expr, ExprCall, ExprMethodCall, ExprPath, ExprUnsafe, ItemUse, UseTree};
+use syn::{Expr, ExprCall, ExprLit, ExprMethodCall, ExprPath, ExprUnsafe, ItemUse, UseTree};
 
 /// Network-related module and function patterns to detect.
 /// These indicate potential network I/O in build scripts which could be suspicious.
@@ -300,9 +300,16 @@ impl Detector {
         visitor.findings
     }
 
-    fn detect_sensitive_paths(&self, _ast: &syn::File, _source: &str, _path: &str) -> Vec<Finding> {
-        // TODO: Implement sensitive path detection
-        Vec::new()
+    /// Detect access to sensitive file paths that could indicate credential theft.
+    ///
+    /// Looks for:
+    /// - String literals containing sensitive paths (~/.ssh, ~/.aws, /etc/passwd, etc.)
+    /// - Path construction that references home directories plus sensitive subdirectories
+    /// - Functions that access known credential files
+    fn detect_sensitive_paths(&self, ast: &syn::File, source: &str, path: &str) -> Vec<Finding> {
+        let mut visitor = SensitivePathVisitor::new(source, path);
+        visitor.visit_file(ast);
+        visitor.findings
     }
 
     fn detect_obfuscation(&self, _ast: &syn::File, _source: &str, _path: &str) -> Vec<Finding> {
@@ -1111,6 +1118,580 @@ impl<'a> Visit<'a> for EnvAccessVisitor<'a> {
             );
         }
         syn::visit::visit_expr_path(self, node);
+    }
+}
+
+// ============================================================================
+// Unsafe Block Detection
+// ============================================================================
+
+/// Sensitive path patterns that could indicate credential theft or privacy violation.
+/// Access to these paths from build scripts is highly suspicious.
+const SENSITIVE_PATHS: &[&str] = &[
+    // SSH keys and configuration
+    ".ssh",
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "authorized_keys",
+    "known_hosts",
+    // AWS credentials
+    ".aws",
+    "credentials",
+    "aws_access_key",
+    // GCP credentials
+    ".gcloud",
+    "application_default_credentials.json",
+    "service_account.json",
+    // Azure credentials
+    ".azure",
+    "accessTokens.json",
+    // Docker credentials
+    ".docker/config.json",
+    // Kubernetes credentials
+    ".kube/config",
+    ".kube",
+    // System files
+    "/etc/passwd",
+    "/etc/shadow",
+    "/etc/sudoers",
+    "/etc/hosts",
+    // Git credentials
+    ".gitconfig",
+    ".git-credentials",
+    ".netrc",
+    // Browser data
+    ".mozilla",
+    ".chrome",
+    ".chromium",
+    "Local State",
+    "Login Data",
+    "Cookies",
+    // Password managers
+    ".gnupg",
+    ".password-store",
+    "Keychain",
+    // NPM tokens
+    ".npmrc",
+    // Generic credential patterns
+    "private_key",
+    "privatekey",
+    "secret",
+    "token",
+    "password",
+    "passwd",
+    "credential",
+    // Shell history (could contain secrets)
+    ".bash_history",
+    ".zsh_history",
+    ".history",
+    // Environment files
+    ".env",
+    ".env.local",
+    ".env.production",
+    // IDE credentials
+    ".vscode",
+    ".idea",
+];
+
+/// Home directory expansion patterns
+const HOME_EXPANSIONS: &[&str] = &[
+    "~",
+    "$HOME",
+    "env::var(\"HOME\")",
+    "env::var(\"USERPROFILE\")",
+    "home_dir()",
+    "dirs::home_dir",
+    "BaseDirs",
+];
+
+/// Threshold for considering an unsafe block "large" (number of statements)
+const LARGE_UNSAFE_BLOCK_THRESHOLD: usize = 5;
+
+/// Raw pointer patterns that are particularly suspicious
+const RAW_POINTER_PATTERNS: &[&str] = &[
+    "*const",
+    "*mut",
+    "as_ptr",
+    "as_mut_ptr",
+    "offset",
+    "add",
+    "sub",
+    "read",
+    "write",
+    "copy",
+    "copy_nonoverlapping",
+    "write_bytes",
+    "read_unaligned",
+    "write_unaligned",
+    "read_volatile",
+    "write_volatile",
+    "drop_in_place",
+    "transmute",
+    "from_raw_parts",
+    "from_raw_parts_mut",
+    "slice_from_raw_parts",
+    "slice_from_raw_parts_mut",
+];
+
+/// FFI-related patterns within unsafe blocks
+const FFI_PATTERNS: &[&str] = &[
+    "extern",
+    "libc::",
+    "winapi::",
+    "ffi::",
+    "c_void",
+    "CStr",
+    "CString",
+];
+
+/// Visitor that walks the AST looking for unsafe blocks
+struct UnsafeBlockVisitor<'a> {
+    source: &'a str,
+    file_path: &'a str,
+    findings: Vec<Finding>,
+}
+
+impl<'a> UnsafeBlockVisitor<'a> {
+    fn new(source: &'a str, file_path: &'a str) -> Self {
+        Self {
+            source,
+            file_path,
+            findings: Vec::new(),
+        }
+    }
+
+    /// Get the line number from a span
+    fn get_line_number(&self, span: proc_macro2::Span) -> usize {
+        span.start().line
+    }
+
+    /// Get the end line number from a span
+    fn get_end_line_number(&self, span: proc_macro2::Span) -> usize {
+        span.end().line
+    }
+
+    /// Count statements in an unsafe block
+    fn count_statements(block: &syn::Block) -> usize {
+        block.stmts.len()
+    }
+
+    /// Check if an expression contains raw pointer operations
+    fn contains_raw_pointer_operations(source_snippet: &str) -> bool {
+        for pattern in RAW_POINTER_PATTERNS {
+            if source_snippet.contains(pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if an expression contains FFI patterns
+    fn contains_ffi_patterns(source_snippet: &str) -> bool {
+        for pattern in FFI_PATTERNS {
+            if source_snippet.contains(pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Extract the source text for a given line range
+    fn extract_source_lines(&self, start_line: usize, end_line: usize) -> String {
+        let lines: Vec<&str> = self.source.lines().collect();
+        let start_idx = start_line.saturating_sub(1);
+        let end_idx = end_line.min(lines.len());
+        lines[start_idx..end_idx].join("\n")
+    }
+
+    /// Create a finding for a detected unsafe block
+    fn create_finding(
+        &mut self,
+        line_start: usize,
+        line_end: usize,
+        pattern_found: &str,
+        summary: &str,
+        is_suspicious: bool,
+    ) {
+        let (context_before, snippet, context_after) =
+            extract_snippet(self.source, line_start, line_end, 3);
+
+        // Large unsafe blocks or those with raw pointers get Medium severity
+        // Generic unsafe blocks get Low severity (as per spec)
+        let severity = if is_suspicious {
+            sus_core::Severity::Medium
+        } else {
+            default_severity(IssueType::UnsafeBlock)
+        };
+
+        let finding = Finding::new(
+            IssueType::UnsafeBlock,
+            severity,
+            self.file_path.to_string(),
+            line_start,
+            line_end,
+            snippet,
+            summary.to_string(),
+        )
+        .with_context(context_before, context_after)
+        .with_details(serde_json::json!({
+            "pattern": pattern_found,
+            "detection_type": "unsafe_block",
+            "is_suspicious": is_suspicious
+        }));
+
+        self.findings.push(finding);
+    }
+}
+
+impl<'a> Visit<'a> for UnsafeBlockVisitor<'a> {
+    /// Visit unsafe blocks in expressions
+    fn visit_expr_unsafe(&mut self, node: &'a ExprUnsafe) {
+        let start_line = self.get_line_number(node.unsafe_token.span);
+        let end_line = self.get_end_line_number(
+            node.block
+                .brace_token
+                .span
+                .close(),
+        );
+
+        let stmt_count = Self::count_statements(&node.block);
+        let source_snippet = self.extract_source_lines(start_line, end_line);
+
+        let has_raw_pointers = Self::contains_raw_pointer_operations(&source_snippet);
+        let has_ffi = Self::contains_ffi_patterns(&source_snippet);
+        let is_large = stmt_count >= LARGE_UNSAFE_BLOCK_THRESHOLD;
+
+        // Determine what makes this unsafe block suspicious
+        let mut reasons = Vec::new();
+        if is_large {
+            reasons.push(format!("large block ({} statements)", stmt_count));
+        }
+        if has_raw_pointers {
+            reasons.push("raw pointer manipulation".to_string());
+        }
+        if has_ffi {
+            reasons.push("FFI calls".to_string());
+        }
+
+        let is_suspicious = is_large || has_raw_pointers || has_ffi;
+
+        let summary = if reasons.is_empty() {
+            "Unsafe block detected".to_string()
+        } else {
+            format!("Unsafe block detected: {}", reasons.join(", "))
+        };
+
+        let pattern = if has_raw_pointers {
+            "raw_pointer"
+        } else if has_ffi {
+            "ffi"
+        } else if is_large {
+            "large_block"
+        } else {
+            "unsafe_block"
+        };
+
+        self.create_finding(start_line, end_line, pattern, &summary, is_suspicious);
+
+        // Continue visiting child nodes
+        syn::visit::visit_expr_unsafe(self, node);
+    }
+
+    /// Also check for unsafe functions
+    fn visit_item_fn(&mut self, node: &'a syn::ItemFn) {
+        if node.sig.unsafety.is_some() {
+            let start_line = self.get_line_number(node.sig.fn_token.span);
+            let end_line = if let Some(block) = node.block.stmts.last() {
+                // Get the end of the last statement
+                self.source
+                    .lines()
+                    .enumerate()
+                    .filter(|(_, _line)| true)
+                    .count()
+                    .min(start_line + 20) // Limit to reasonable size
+            } else {
+                start_line
+            };
+
+            let source_snippet = self.extract_source_lines(start_line, end_line.min(start_line + 20));
+            let has_raw_pointers = Self::contains_raw_pointer_operations(&source_snippet);
+            let has_ffi = Self::contains_ffi_patterns(&source_snippet);
+
+            let is_suspicious = has_raw_pointers || has_ffi;
+
+            let summary = format!(
+                "Unsafe function declared: {}{}",
+                node.sig.ident,
+                if has_raw_pointers {
+                    " (contains raw pointer operations)"
+                } else if has_ffi {
+                    " (contains FFI calls)"
+                } else {
+                    ""
+                }
+            );
+
+            self.create_finding(
+                start_line,
+                start_line,
+                "unsafe_fn",
+                &summary,
+                is_suspicious,
+            );
+        }
+
+        // Continue visiting the function body
+        syn::visit::visit_item_fn(self, node);
+    }
+}
+
+// ============================================================================
+// Sensitive Path Detection
+// ============================================================================
+
+/// Visitor that walks the AST looking for access to sensitive file paths.
+/// This detects potential credential theft or privacy violations.
+struct SensitivePathVisitor<'a> {
+    source: &'a str,
+    file_path: &'a str,
+    findings: Vec<Finding>,
+}
+
+impl<'a> SensitivePathVisitor<'a> {
+    fn new(source: &'a str, file_path: &'a str) -> Self {
+        Self {
+            source,
+            file_path,
+            findings: Vec::new(),
+        }
+    }
+
+    /// Check if a string contains a sensitive path pattern
+    fn contains_sensitive_path(s: &str) -> Option<&'static str> {
+        let s_lower = s.to_lowercase();
+        for pattern in SENSITIVE_PATHS {
+            // Check for the pattern as a path component or substring
+            if s_lower.contains(&pattern.to_lowercase()) {
+                return Some(pattern);
+            }
+        }
+        None
+    }
+
+    /// Check if a string contains home directory expansion patterns
+    fn contains_home_expansion(s: &str) -> bool {
+        for pattern in HOME_EXPANSIONS {
+            if s.contains(pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Determine if a path access is particularly dangerous
+    fn is_highly_sensitive(path: &str) -> bool {
+        let path_lower = path.to_lowercase();
+        // These paths are most commonly targeted for credential theft
+        path_lower.contains(".ssh")
+            || path_lower.contains("id_rsa")
+            || path_lower.contains("id_ed25519")
+            || path_lower.contains(".aws")
+            || path_lower.contains("/etc/passwd")
+            || path_lower.contains("/etc/shadow")
+            || path_lower.contains(".gnupg")
+            || path_lower.contains("private_key")
+            || path_lower.contains("secret")
+    }
+
+    /// Get the line number from a span
+    fn get_line_number(&self, span: proc_macro2::Span) -> usize {
+        span.start().line
+    }
+
+    /// Create a finding for a detected sensitive path access
+    fn create_finding(&mut self, line: usize, path_detected: &str, summary: &str) {
+        let (context_before, snippet, context_after) =
+            extract_snippet(self.source, line, line, 3);
+
+        let finding = Finding::new(
+            IssueType::SensitivePath,
+            default_severity(IssueType::SensitivePath), // High severity
+            self.file_path.to_string(),
+            line,
+            line,
+            snippet,
+            summary.to_string(),
+        )
+        .with_context(context_before, context_after)
+        .with_details(serde_json::json!({
+            "pattern": path_detected,
+            "detection_type": "sensitive_path",
+            "is_highly_sensitive": Self::is_highly_sensitive(path_detected)
+        }));
+
+        self.findings.push(finding);
+    }
+
+    /// Extract string literal value from a syn::Lit
+    fn extract_string_literal(lit: &syn::Lit) -> Option<String> {
+        if let syn::Lit::Str(lit_str) = lit {
+            Some(lit_str.value())
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> Visit<'a> for SensitivePathVisitor<'a> {
+    /// Check literal expressions for sensitive paths
+    fn visit_expr_lit(&mut self, node: &'a ExprLit) {
+        if let Some(path_str) = Self::extract_string_literal(&node.lit) {
+            if let Some(pattern) = Self::contains_sensitive_path(&path_str) {
+                let line = self.get_line_number(node.lit.span());
+                let has_home = Self::contains_home_expansion(&path_str);
+
+                let summary = if has_home {
+                    format!(
+                        "Sensitive path access detected (home directory): \"{}\" (matches pattern: {})",
+                        path_str, pattern
+                    )
+                } else {
+                    format!(
+                        "Sensitive path access detected: \"{}\" (matches pattern: {})",
+                        path_str, pattern
+                    )
+                };
+
+                self.create_finding(line, &path_str, &summary);
+            }
+        }
+        syn::visit::visit_expr_lit(self, node);
+    }
+
+    /// Check function calls that might be constructing paths
+    fn visit_expr_call(&mut self, node: &'a ExprCall) {
+        // Check if this is a Path::new() or PathBuf::from() call with sensitive argument
+        if let Expr::Path(ExprPath { path, .. }) = &*node.func {
+            let path_str = format_path(path);
+
+            // Check for path construction functions
+            if path_str.contains("Path::new")
+                || path_str.contains("PathBuf::from")
+                || path_str.contains("PathBuf::new")
+            {
+                // Check the arguments for sensitive paths
+                for arg in &node.args {
+                    if let Expr::Lit(ExprLit { lit, .. }) = arg {
+                        if let Some(arg_str) = Self::extract_string_literal(lit) {
+                            if let Some(pattern) = Self::contains_sensitive_path(&arg_str) {
+                                let line = self.get_line_number(
+                                    path.segments
+                                        .first()
+                                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                                );
+                                self.create_finding(
+                                    line,
+                                    &arg_str,
+                                    &format!(
+                                        "Path construction to sensitive location: {}(\"{}\")",
+                                        path_str, arg_str
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check for home directory functions
+            if path_str.contains("home_dir")
+                || path_str.contains("dirs::home_dir")
+                || path_str.contains("BaseDirs")
+                || path_str.contains("UserDirs")
+            {
+                let line = self.get_line_number(
+                    path.segments
+                        .first()
+                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                );
+                // This is just home directory access, not necessarily sensitive
+                // We flag it with lower priority - it becomes concerning when combined with sensitive paths
+                // Check if this is used in a chain with push() to a sensitive path
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    /// Check method calls for path operations that might access sensitive locations
+    fn visit_expr_method_call(&mut self, node: &'a ExprMethodCall) {
+        let method_name = node.method.to_string();
+
+        // Check for .push() and .join() which are used to construct paths
+        if method_name == "push" || method_name == "join" {
+            for arg in &node.args {
+                if let Expr::Lit(ExprLit { lit, .. }) = arg {
+                    if let Some(arg_str) = Self::extract_string_literal(lit) {
+                        if let Some(pattern) = Self::contains_sensitive_path(&arg_str) {
+                            let line = self.get_line_number(node.method.span());
+                            self.create_finding(
+                                line,
+                                &arg_str,
+                                &format!(
+                                    "Path {}() to sensitive location: \"{}\" (matches pattern: {})",
+                                    method_name, arg_str, pattern
+                                ),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Check for read operations on paths
+        if method_name == "read_to_string"
+            || method_name == "read"
+            || method_name == "read_dir"
+        {
+            // Check if the receiver or earlier parts of the chain contain sensitive paths
+            // This is handled by the literal check
+        }
+
+        syn::visit::visit_expr_method_call(self, node);
+    }
+
+    /// Check macro calls for sensitive paths (e.g., include_str!, include_bytes!)
+    fn visit_macro(&mut self, node: &'a syn::Macro) {
+        // Get the macro path
+        let macro_path = format_path(&node.path);
+
+        // Check for include macros which read files at compile time
+        if macro_path.contains("include_str")
+            || macro_path.contains("include_bytes")
+            || macro_path.contains("include")
+        {
+            // The tokens inside the macro might contain a path string
+            let tokens_str = node.tokens.to_string();
+            if let Some(pattern) = Self::contains_sensitive_path(&tokens_str) {
+                let line = self.get_line_number(
+                    node.path
+                        .segments
+                        .first()
+                        .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+                );
+                self.create_finding(
+                    line,
+                    &tokens_str,
+                    &format!(
+                        "Macro accessing sensitive path: {}!({}) (matches pattern: {})",
+                        macro_path, tokens_str, pattern
+                    ),
+                );
+            }
+        }
+
+        syn::visit::visit_macro(self, node);
     }
 }
 
@@ -1979,5 +2560,675 @@ fn main() {
             "Should detect all sensitive keyword patterns as High severity, found {}",
             env_findings.len()
         );
+    }
+
+    // ========================================================================
+    // Unsafe Block Detection Tests
+    // ========================================================================
+
+    /// Test detection of basic unsafe block
+    #[test]
+    fn test_detect_basic_unsafe_block() {
+        let source = r#"
+fn main() {
+    unsafe {
+        let x = 5;
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let unsafe_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::UnsafeBlock)
+            .collect();
+
+        assert!(!unsafe_findings.is_empty(), "Should detect unsafe block");
+    }
+
+    /// Test that basic unsafe blocks have Low severity (as per spec)
+    #[test]
+    fn test_basic_unsafe_has_low_severity() {
+        let source = r#"
+fn main() {
+    unsafe {
+        let x = 5;
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let unsafe_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::UnsafeBlock)
+            .collect();
+
+        assert!(!unsafe_findings.is_empty(), "Should detect unsafe block");
+        assert_eq!(
+            unsafe_findings[0].severity,
+            sus_core::Severity::Low,
+            "Basic unsafe block should have Low severity"
+        );
+    }
+
+    /// Test detection of large unsafe block (many statements)
+    #[test]
+    fn test_detect_large_unsafe_block() {
+        let source = r#"
+fn main() {
+    unsafe {
+        let a = 1;
+        let b = 2;
+        let c = 3;
+        let d = 4;
+        let e = 5;
+        let f = 6;
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let unsafe_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::UnsafeBlock)
+            .collect();
+
+        assert!(!unsafe_findings.is_empty(), "Should detect large unsafe block");
+        // Large unsafe blocks should be flagged as suspicious
+        assert!(
+            unsafe_findings[0].summary.contains("large block") ||
+            unsafe_findings[0].summary.contains("statements"),
+            "Should mention large block in summary"
+        );
+    }
+
+    /// Test detection of raw pointer manipulation
+    #[test]
+    fn test_detect_raw_pointer_manipulation() {
+        let source = r#"
+fn main() {
+    let ptr: *const i32 = std::ptr::null();
+    unsafe {
+        let val = *ptr;
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let unsafe_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::UnsafeBlock)
+            .collect();
+
+        assert!(!unsafe_findings.is_empty(), "Should detect unsafe block with raw pointer");
+    }
+
+    /// Test detection of transmute (particularly dangerous)
+    #[test]
+    fn test_detect_transmute() {
+        let source = r#"
+fn dangerous() {
+    unsafe {
+        let x: i32 = std::mem::transmute(1.0f32);
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let unsafe_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::UnsafeBlock)
+            .collect();
+
+        assert!(!unsafe_findings.is_empty(), "Should detect transmute in unsafe block");
+        // Transmute should be flagged as raw pointer manipulation
+        assert!(
+            unsafe_findings.iter().any(|f| f.summary.contains("raw pointer")),
+            "Should flag transmute as raw pointer manipulation"
+        );
+    }
+
+    /// Test detection of unsafe function
+    #[test]
+    fn test_detect_unsafe_function() {
+        let source = r#"
+unsafe fn dangerous_function() {
+    let x = 5;
+}
+
+fn main() {}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let unsafe_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::UnsafeBlock)
+            .collect();
+
+        assert!(!unsafe_findings.is_empty(), "Should detect unsafe function");
+        assert!(
+            unsafe_findings.iter().any(|f| f.summary.contains("Unsafe function")),
+            "Should mention unsafe function in summary"
+        );
+    }
+
+    /// Test detection of FFI patterns within unsafe
+    #[test]
+    fn test_detect_ffi_in_unsafe() {
+        let source = r#"
+use std::ffi::CStr;
+
+fn main() {
+    unsafe {
+        let c_str: *const libc::c_char = std::ptr::null();
+        CStr::from_ptr(c_str);
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let unsafe_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::UnsafeBlock)
+            .collect();
+
+        assert!(!unsafe_findings.is_empty(), "Should detect FFI in unsafe block");
+    }
+
+    /// Test that raw pointer manipulation has Medium severity (elevated from Low)
+    #[test]
+    fn test_raw_pointer_has_medium_severity() {
+        let source = r#"
+fn main() {
+    let ptr: *const i32 = std::ptr::null();
+    unsafe {
+        let val = ptr.read();
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let unsafe_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::UnsafeBlock)
+            .filter(|f| f.summary.contains("raw pointer"))
+            .collect();
+
+        assert!(!unsafe_findings.is_empty(), "Should detect raw pointer operations");
+        assert_eq!(
+            unsafe_findings[0].severity,
+            sus_core::Severity::Medium,
+            "Raw pointer manipulation should have Medium severity"
+        );
+    }
+
+    /// Test detection of from_raw_parts (memory manipulation)
+    #[test]
+    fn test_detect_from_raw_parts() {
+        let source = r#"
+fn main() {
+    let data = vec![1, 2, 3];
+    let ptr = data.as_ptr();
+    unsafe {
+        let slice = std::slice::from_raw_parts(ptr, 3);
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let unsafe_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::UnsafeBlock)
+            .collect();
+
+        assert!(!unsafe_findings.is_empty(), "Should detect from_raw_parts in unsafe");
+        assert!(
+            unsafe_findings.iter().any(|f| f.summary.contains("raw pointer")),
+            "Should flag from_raw_parts as raw pointer manipulation"
+        );
+    }
+
+    /// Test detection of pointer offset operations
+    #[test]
+    fn test_detect_pointer_offset() {
+        let source = r#"
+fn main() {
+    let arr = [1, 2, 3, 4, 5];
+    let ptr = arr.as_ptr();
+    unsafe {
+        let elem = *ptr.offset(2);
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let unsafe_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::UnsafeBlock)
+            .collect();
+
+        assert!(!unsafe_findings.is_empty(), "Should detect pointer offset in unsafe");
+        assert!(
+            unsafe_findings.iter().any(|f| f.summary.contains("raw pointer")),
+            "Should flag offset as raw pointer manipulation"
+        );
+    }
+
+    /// Test context extraction for unsafe blocks
+    #[test]
+    fn test_unsafe_block_context_extraction() {
+        let source = r#"// Line 1
+// Line 2
+// Line 3
+fn main() {
+    unsafe {
+        let x = 5;
+    }
+}
+// Line 9
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let unsafe_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::UnsafeBlock)
+            .collect();
+
+        assert!(!unsafe_findings.is_empty(), "Should detect unsafe block");
+        let finding = &unsafe_findings[0];
+
+        // Context should include surrounding lines
+        assert!(
+            !finding.context_before.is_empty() || !finding.context_after.is_empty(),
+            "Should have some context"
+        );
+    }
+
+    /// Test multiple unsafe blocks in same file
+    #[test]
+    fn test_multiple_unsafe_blocks() {
+        let source = r#"
+fn first() {
+    unsafe {
+        let a = 1;
+    }
+}
+
+fn second() {
+    unsafe {
+        let b = 2;
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let unsafe_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::UnsafeBlock)
+            .collect();
+
+        assert!(
+            unsafe_findings.len() >= 2,
+            "Should detect multiple unsafe blocks, found {}",
+            unsafe_findings.len()
+        );
+    }
+
+    // ========================================================================
+    // Sensitive Path Detection Tests
+    // ========================================================================
+
+    /// Test detection of ~/.ssh access
+    #[test]
+    fn test_detect_ssh_directory_access() {
+        let source = r#"
+use std::fs;
+
+fn steal_keys() {
+    let keys = fs::read_to_string("~/.ssh/id_rsa").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect ~/.ssh access");
+        assert!(
+            sensitive_findings.iter().any(|f| f.summary.contains(".ssh") || f.summary.contains("id_rsa")),
+            "Summary should mention .ssh or id_rsa"
+        );
+    }
+
+    /// Test that sensitive path access has High severity
+    #[test]
+    fn test_sensitive_path_has_high_severity() {
+        let source = r#"
+fn main() {
+    let path = "/etc/passwd";
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect /etc/passwd access");
+        assert_eq!(
+            sensitive_findings[0].severity,
+            sus_core::Severity::High,
+            "Sensitive path access should have High severity"
+        );
+    }
+
+    /// Test detection of AWS credentials path
+    #[test]
+    fn test_detect_aws_credentials_path() {
+        let source = r#"
+use std::fs;
+
+fn steal_aws() {
+    let creds = fs::read_to_string("~/.aws/credentials").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect ~/.aws access");
+        assert!(
+            sensitive_findings.iter().any(|f| f.summary.contains(".aws") || f.summary.contains("credentials")),
+            "Summary should mention .aws or credentials"
+        );
+    }
+
+    /// Test detection of /etc/shadow (highly sensitive)
+    #[test]
+    fn test_detect_etc_shadow() {
+        let source = r#"
+fn main() {
+    let shadow = std::fs::read_to_string("/etc/shadow");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect /etc/shadow access");
+    }
+
+    /// Test detection of Path::new() with sensitive path
+    #[test]
+    fn test_detect_path_new_sensitive() {
+        let source = r#"
+use std::path::Path;
+
+fn main() {
+    let path = Path::new("~/.gnupg/private-keys-v1.d");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect Path::new with sensitive path");
+    }
+
+    /// Test detection of path.join() with sensitive path
+    #[test]
+    fn test_detect_path_join_sensitive() {
+        let source = r#"
+use std::path::PathBuf;
+
+fn main() {
+    let home = PathBuf::from("/home/user");
+    let ssh = home.join(".ssh");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect path.join() with .ssh");
+    }
+
+    /// Test detection of .env file access
+    #[test]
+    fn test_detect_env_file_access() {
+        let source = r#"
+fn main() {
+    let env_contents = std::fs::read_to_string(".env").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect .env file access");
+    }
+
+    /// Test detection of browser data access
+    #[test]
+    fn test_detect_browser_data_access() {
+        let source = r#"
+fn steal_cookies() {
+    let cookies = std::fs::read("~/.mozilla/firefox/cookies.sqlite");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect browser data access");
+    }
+
+    /// Test detection of shell history access
+    #[test]
+    fn test_detect_shell_history_access() {
+        let source = r#"
+fn exfiltrate_history() {
+    let history = std::fs::read_to_string("~/.bash_history").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect .bash_history access");
+    }
+
+    /// Test detection of Kubernetes config access
+    #[test]
+    fn test_detect_kube_config_access() {
+        let source = r#"
+fn steal_kube_config() {
+    let config = std::fs::read_to_string("~/.kube/config").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect .kube/config access");
+    }
+
+    /// Test detection of docker config access
+    #[test]
+    fn test_detect_docker_config_access() {
+        let source = r#"
+fn steal_docker_creds() {
+    let config = std::fs::read_to_string("~/.docker/config.json").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect .docker/config.json access");
+    }
+
+    /// Test context extraction for sensitive path findings
+    #[test]
+    fn test_sensitive_path_context_extraction() {
+        let source = r#"// Line 1
+// Line 2
+// Line 3
+fn steal() {
+    let key = "~/.ssh/id_rsa";
+}
+// Line 7
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect sensitive path");
+        let finding = &sensitive_findings[0];
+
+        // Context should include surrounding lines
+        assert!(
+            !finding.context_before.is_empty() || !finding.context_after.is_empty(),
+            "Should have some context"
+        );
+    }
+
+    /// Test that non-sensitive paths are not flagged
+    #[test]
+    fn test_non_sensitive_path_not_flagged() {
+        let source = r#"
+fn main() {
+    let path = "/usr/local/bin/myapp";
+    let data = std::fs::read("/tmp/data.txt");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        // These paths are not in the sensitive list
+        assert!(
+            sensitive_findings.is_empty(),
+            "Non-sensitive paths should not be flagged, found: {:?}",
+            sensitive_findings.iter().map(|f| &f.summary).collect::<Vec<_>>()
+        );
+    }
+
+    /// Test detection of private key patterns in paths
+    #[test]
+    fn test_detect_private_key_path() {
+        let source = r#"
+fn steal_keys() {
+    let key = std::fs::read("/app/private_key.pem");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect private_key in path");
+    }
+
+    /// Test detection of NPM tokens
+    #[test]
+    fn test_detect_npmrc_access() {
+        let source = r#"
+fn steal_npm_token() {
+    let npmrc = std::fs::read_to_string("~/.npmrc").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect .npmrc access");
+    }
+
+    /// Test detection of git credentials
+    #[test]
+    fn test_detect_git_credentials_access() {
+        let source = r#"
+fn steal_git_creds() {
+    let creds = std::fs::read_to_string("~/.git-credentials").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let sensitive_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::SensitivePath)
+            .collect();
+
+        assert!(!sensitive_findings.is_empty(), "Should detect .git-credentials access");
     }
 }
