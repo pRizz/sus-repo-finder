@@ -6559,4 +6559,150 @@ fn main() {
             "Should detect cargo directive in print! macro too"
         );
     }
+
+    // ========================================================================
+    // Macro Codegen Detection Tests
+    // ========================================================================
+
+    /// Test that the detector detects file writing in proc-macro context
+    #[test]
+    fn test_detect_proc_macro_file_write() {
+        let source = r#"
+use proc_macro::TokenStream;
+use std::fs::File;
+use std::io::Write;
+
+#[proc_macro]
+pub fn my_macro(input: TokenStream) -> TokenStream {
+    let mut file = File::create("output.rs").unwrap();
+    file.write_all(b"generated code").unwrap();
+    input
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "lib.rs");
+
+        let macro_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::MacroCodegen)
+            .collect();
+
+        assert!(
+            !macro_findings.is_empty(),
+            "Should detect file writing in proc-macro"
+        );
+    }
+
+    /// Test that detector detects std::fs::write in proc-macro
+    #[test]
+    fn test_detect_fs_write_in_proc_macro() {
+        let source = r#"
+use proc_macro::TokenStream;
+use std::fs;
+
+#[proc_macro_derive(MyDerive)]
+pub fn derive_my_derive(input: TokenStream) -> TokenStream {
+    fs::write("generated.rs", "code").unwrap();
+    input
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "lib.rs");
+
+        let macro_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::MacroCodegen)
+            .collect();
+
+        assert!(
+            !macro_findings.is_empty(),
+            "Should detect fs::write in proc-macro"
+        );
+    }
+
+    /// Test that detector detects OUT_DIR access
+    #[test]
+    fn test_detect_out_dir_access() {
+        let source = r#"
+use std::env;
+use std::fs;
+
+fn main() {
+    let out_dir = env::var("OUT_DIR").unwrap();
+    fs::write(format!("{}/generated.rs", out_dir), "code").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let macro_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::MacroCodegen)
+            .collect();
+
+        assert!(
+            !macro_findings.is_empty(),
+            "Should detect OUT_DIR access for code generation"
+        );
+    }
+
+    /// Test that detector detects BufWriter usage in proc-macro
+    #[test]
+    fn test_detect_bufwriter_in_proc_macro() {
+        let source = r#"
+use proc_macro::TokenStream;
+use std::fs::File;
+use std::io::BufWriter;
+
+#[proc_macro_attribute]
+pub fn my_attr(_attr: TokenStream, item: TokenStream) -> TokenStream {
+    let file = File::create("out.rs").unwrap();
+    let mut writer = BufWriter::new(file);
+    item
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "lib.rs");
+
+        let macro_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::MacroCodegen)
+            .collect();
+
+        assert!(
+            !macro_findings.is_empty(),
+            "Should detect BufWriter in proc-macro context"
+        );
+    }
+
+    /// Test that macro codegen findings have medium severity
+    #[test]
+    fn test_macro_codegen_severity_is_medium() {
+        let source = r#"
+use proc_macro::TokenStream;
+use std::fs;
+
+#[proc_macro]
+pub fn my_macro(input: TokenStream) -> TokenStream {
+    fs::write("output.rs", "generated").unwrap();
+    input
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "lib.rs");
+
+        let macro_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::MacroCodegen)
+            .collect();
+
+        assert!(!macro_findings.is_empty(), "Should detect macro codegen");
+        for finding in macro_findings {
+            assert_eq!(
+                finding.severity,
+                Severity::Medium,
+                "Macro codegen findings should have medium severity"
+            );
+        }
+    }
 }
