@@ -150,3 +150,76 @@
 ### Current Completion Status:
 - Features passing: 2/170 → Feature #5 now also passing
 - Feature #5 (Crawler server starts on configured port) - PASSING
+[Testing] 2026-01-19 17:59:18 - Regression test for Feature #5 (Crawler server starts on configured port)
+  - Server running on port 3001 (verified via lsof)
+  - All 5 routes respond correctly: /, /detailed, /errors, /api/crawler/status, /api/crawler/stats
+  - Browser automation verification complete with screenshots
+  - Only expected console error (favicon.ico 404)
+  - Feature still PASSING ✅
+[Testing] 2026-01-19 17:59:46 - Regression test for Feature #4 (Dashboard server starts on configured port)
+  - Built dashboard binary verified at ./target/debug/sus-dashboard
+  - Started server successfully with DASHBOARD_PORT=3002
+  - Homepage returns 'Sus Dashboard - Landing Page (TODO: implement template)'
+  - API endpoint /api/stats returns valid JSON with stats
+  - No console errors detected
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #4 (Dashboard server) still passing
+
+[Testing] 2026-01-19 17:59:56 - Regression test for Feature #4 (Dashboard server starts on configured port)
+  - Server running on port 3002 (pid 49969)
+  - Homepage responds: 'Sus Dashboard - Landing Page'
+  - API endpoint /api/stats returns valid JSON
+  - Browser automation verification complete
+  - Only minor issue: missing favicon.ico (cosmetic, not functional)
+  - Feature still PASSING ✅
+
+## Session: 2026-01-19 (Agent #3 - Feature #3)
+
+### Feature #3: sus-core crate exports shared types
+**Status: PASSING**
+
+#### What was done:
+- Added comprehensive documentation to sus-core/src/lib.rs listing all exported types
+- Added tests to verify all enum types are properly exported with their variants
+- Added tests to verify all model structs are properly exported with expected fields
+- Added tests to verify trait implementations (Display, FromStr, Serialize, Deserialize, etc.)
+- Fixed sqlx compatibility by adding `chrono` feature for DateTime<Utc> support
+
+#### Types verified as exported:
+**Enums (from types module):**
+- Severity (Low, Medium, High)
+- IssueType (all 12 variants: Network, FileAccess, ShellCommand, ProcessSpawn, EnvAccess, DynamicLib, UnsafeBlock, BuildDownload, SensitivePath, Obfuscation, CompilerFlags, MacroCodegen)
+- AnalysisStatus (Pending, InProgress, Completed, Failed)
+- CrawlerStatus (Running, Paused, Completed, Crashed)
+
+**Models (from models module):**
+- Crate, CrateWithStats, Version, AnalysisResult, CrawlerState, CrawlerError, QueueItem
+
+**Database Access:**
+- Database
+
+#### Tests added:
+- `test_enum_types_exported` - verifies all enum variants accessible
+- `test_model_types_exported` - verifies all model fields accessible
+- `test_database_type_exported` - verifies Database type accessible
+- `test_severity_traits` - verifies Display, FromStr, Debug, Clone, Copy, PartialEq
+- `test_issue_type_traits` - verifies Display, FromStr, Debug, Clone, PartialEq
+- `test_models_serde` - verifies Serialize and Deserialize implementations
+
+#### Steps verified:
+1. ✅ Import sus-core in sus-crawler - verified via grep showing `sus_core::Database` used
+2. ✅ Verify Severity enum has Low, Medium, High variants - test passes
+3. ✅ Verify IssueType enum has all 12 pattern types - test passes
+
+#### Changes made:
+1. Updated Cargo.toml to add `chrono` feature to sqlx for DateTime<Utc> support
+2. Added comprehensive documentation to sus-core/src/lib.rs
+3. Added export verification tests to sus-core/src/lib.rs
+
+#### Current Completion Status:
+- Features passing: 5/170 (2.9%)
+- Feature #1 (Cargo workspace initializes without errors) - PASSING
+- Feature #2 (SQLite database initializes with schema) - PASSING
+- Feature #3 (sus-core crate exports shared types) - PASSING
+- Feature #4 (Dashboard server starts on configured port) - PASSING
+- Feature #5 (Crawler server starts on configured port) - PASSING
