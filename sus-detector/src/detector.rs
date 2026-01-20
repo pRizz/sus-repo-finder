@@ -346,6 +346,7 @@ impl Detector {
                 findings.extend(self.detect_unsafe_blocks(&syntax_tree, source, file_path));
                 findings.extend(self.detect_sensitive_paths(&syntax_tree, source, file_path));
                 findings.extend(self.detect_obfuscation(&syntax_tree, source, file_path));
+                findings.extend(self.detect_build_download(&syntax_tree, source, file_path));
                 findings.extend(self.detect_compiler_flags(source, file_path));
             }
             Err(e) => {
@@ -467,9 +468,147 @@ impl Detector {
         visitor.findings
     }
 
-    fn detect_compiler_flags(&self, _source: &str, _path: &str) -> Vec<Finding> {
-        // TODO: Implement compiler flag detection
-        Vec::new()
+    /// Detect build-time downloads that could fetch malicious code or binaries.
+    ///
+    /// Looks for:
+    /// - URL string literals (https://, http://, ftp://)
+    /// - Download-related function calls (download(), fetch(), get())
+    /// - Archive extraction functions (untar, unzip, extract)
+    /// - References to prebuilt binaries or artifacts
+    fn detect_build_download(&self, ast: &syn::File, source: &str, path: &str) -> Vec<Finding> {
+        let mut visitor = BuildDownloadVisitor::new(source, path);
+        visitor.visit_file(ast);
+        visitor.findings
+    }
+
+    /// Detect compiler/linker flag manipulation through cargo build outputs.
+    ///
+    /// Looks for:
+    /// - println!("cargo:rustc-link-lib=...") - Linking libraries
+    /// - println!("cargo:rustc-link-search=...") - Linker search paths
+    /// - println!("cargo:rustc-cfg=...") - Conditional compilation flags
+    /// - println!("cargo:rustc-env=...") - Environment variables for compilation
+    /// - println!("cargo:rustc-cdylib-link-arg=...") - Linker arguments
+    /// - println!("cargo:rustc-flags=...") - Raw rustc flags (deprecated but suspicious)
+    fn detect_compiler_flags(&self, source: &str, path: &str) -> Vec<Finding> {
+        let mut findings = Vec::new();
+        let lines: Vec<&str> = source.lines().collect();
+
+        for (line_idx, line) in lines.iter().enumerate() {
+            let line_num = line_idx + 1; // 1-indexed
+
+            // Look for println! or print! macros with cargo: directives
+            if let Some(finding) = self.check_cargo_directive(line, line_num, source, path) {
+                findings.push(finding);
+            }
+        }
+
+        findings
+    }
+
+    /// Check a single line for cargo build directives
+    fn check_cargo_directive(
+        &self,
+        line: &str,
+        line_num: usize,
+        source: &str,
+        path: &str,
+    ) -> Option<Finding> {
+        // Skip if line doesn't contain println! or print! with cargo:
+        if !line.contains("println!") && !line.contains("print!") {
+            return None;
+        }
+
+        if !line.contains("cargo:") {
+            return None;
+        }
+
+        // Suspicious cargo directives that manipulate compilation
+        let suspicious_directives = [
+            ("cargo:rustc-link-lib", "Links external library", true),
+            (
+                "cargo:rustc-link-search",
+                "Adds linker search path",
+                true,
+            ),
+            (
+                "cargo:rustc-cdylib-link-arg",
+                "Adds linker argument to cdylib",
+                true,
+            ),
+            ("cargo:rustc-link-arg", "Adds linker argument", true),
+            (
+                "cargo:rustc-flags",
+                "Sets raw rustc flags (deprecated)",
+                true,
+            ),
+            (
+                "cargo:rustc-env",
+                "Sets environment variable during compilation",
+                true,
+            ),
+            (
+                "cargo:rustc-cfg",
+                "Sets conditional compilation flag",
+                false,
+            ),
+            (
+                "cargo:rustc-check-cfg",
+                "Declares valid cfg values",
+                false,
+            ),
+            (
+                "cargo:rerun-if-changed",
+                "Triggers rebuild on file change",
+                false,
+            ),
+            (
+                "cargo:rerun-if-env-changed",
+                "Triggers rebuild on env change",
+                false,
+            ),
+            ("cargo:warning", "Emits build warning", false),
+        ];
+
+        for (directive, description, is_suspicious) in suspicious_directives {
+            if line.contains(directive) {
+                let (context_before, snippet, context_after) =
+                    extract_snippet(source, line_num, line_num, 3);
+
+                // Suspicious directives get medium severity, benign ones get low
+                let severity = if is_suspicious {
+                    Severity::Medium
+                } else {
+                    Severity::Low
+                };
+
+                let summary = format!(
+                    "Cargo build directive detected: {} - {}",
+                    directive, description
+                );
+
+                let finding = Finding::new(
+                    IssueType::CompilerFlags,
+                    severity,
+                    path.to_string(),
+                    line_num,
+                    line_num,
+                    snippet,
+                    summary,
+                )
+                .with_context(context_before, context_after)
+                .with_details(serde_json::json!({
+                    "directive": directive,
+                    "description": description,
+                    "is_suspicious": is_suspicious,
+                    "detection_type": "compiler_flags"
+                }));
+
+                return Some(finding);
+            }
+        }
+
+        None
     }
 }
 
@@ -1021,6 +1160,156 @@ impl<'a> Visit<'a> for ShellCommandVisitor<'a> {
                 line,
                 pattern,
                 &format!("Shell command type reference detected: {}", path_str),
+            );
+        }
+        syn::visit::visit_expr_path(self, node);
+    }
+}
+
+// ============================================================================
+// Process Spawn Detection
+// ============================================================================
+
+/// Visitor that walks the AST looking for process spawning patterns.
+/// This detects low-level process creation like fork/exec, async process spawning,
+/// and subprocess library usage that could be used for privilege escalation or
+/// running arbitrary code at build time.
+struct ProcessSpawnVisitor<'a> {
+    source: &'a str,
+    file_path: &'a str,
+    findings: Vec<Finding>,
+}
+
+impl<'a> ProcessSpawnVisitor<'a> {
+    fn new(source: &'a str, file_path: &'a str) -> Self {
+        Self {
+            source,
+            file_path,
+            findings: Vec::new(),
+        }
+    }
+
+    /// Check if a path segment matches any process spawn pattern
+    fn matches_process_spawn_pattern(path_str: &str) -> bool {
+        for pattern in PROCESS_SPAWN_PATTERNS {
+            if path_str.contains(pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if a method name is a process spawn method
+    fn is_process_spawn_method(method: &str) -> bool {
+        PROCESS_SPAWN_METHODS.contains(&method)
+    }
+
+    /// Get the line number from a span
+    fn get_line_number(&self, span: proc_macro2::Span) -> usize {
+        span.start().line
+    }
+
+    /// Create a finding for a detected process spawn pattern
+    fn create_finding(&mut self, line: usize, pattern_found: &str, summary: &str) {
+        let (context_before, snippet, context_after) =
+            extract_snippet(self.source, line, line, 3);
+
+        let finding = Finding::new(
+            IssueType::ProcessSpawn,
+            default_severity(IssueType::ProcessSpawn),
+            self.file_path.to_string(),
+            line,
+            line,
+            snippet,
+            summary.to_string(),
+        )
+        .with_context(context_before, context_after)
+        .with_details(serde_json::json!({
+            "pattern": pattern_found,
+            "detection_type": "process_spawn"
+        }));
+
+        self.findings.push(finding);
+    }
+}
+
+impl<'a> Visit<'a> for ProcessSpawnVisitor<'a> {
+    /// Check `use` statements for process spawn imports
+    fn visit_item_use(&mut self, node: &'a ItemUse) {
+        let use_str = format_use_tree(&node.tree);
+        if Self::matches_process_spawn_pattern(&use_str) {
+            let line = self.get_line_number(node.use_token.span);
+            let pattern = PROCESS_SPAWN_PATTERNS
+                .iter()
+                .find(|p| use_str.contains(*p))
+                .unwrap_or(&"process_spawn");
+            self.create_finding(
+                line,
+                pattern,
+                &format!("Process spawn import detected: {}", use_str),
+            );
+        }
+        syn::visit::visit_item_use(self, node);
+    }
+
+    /// Check function calls for process spawn patterns
+    fn visit_expr_call(&mut self, node: &'a ExprCall) {
+        if let Expr::Path(ExprPath { path, .. }) = &*node.func {
+            let path_str = format_path(path);
+
+            if Self::matches_process_spawn_pattern(&path_str) {
+                let line = self.get_line_number(path.segments.first().map_or_else(
+                    || proc_macro2::Span::call_site(),
+                    |s| s.ident.span(),
+                ));
+                let pattern = PROCESS_SPAWN_PATTERNS
+                    .iter()
+                    .find(|p| path_str.contains(*p))
+                    .unwrap_or(&"process_spawn");
+                self.create_finding(
+                    line,
+                    pattern,
+                    &format!("Process spawn function call detected: {}", path_str),
+                );
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    /// Check method calls for process spawn methods
+    fn visit_expr_method_call(&mut self, node: &'a ExprMethodCall) {
+        let method_name = node.method.to_string();
+
+        if Self::is_process_spawn_method(&method_name) {
+            let line = self.get_line_number(node.method.span());
+            self.create_finding(
+                line,
+                &method_name,
+                &format!("Process spawn method call detected: .{}()", method_name),
+            );
+        }
+
+        syn::visit::visit_expr_method_call(self, node);
+    }
+
+    /// Check path expressions for process spawn type references
+    fn visit_expr_path(&mut self, node: &'a ExprPath) {
+        let path_str = format_path(&node.path);
+        if Self::matches_process_spawn_pattern(&path_str) {
+            let line = self.get_line_number(
+                node.path
+                    .segments
+                    .first()
+                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+            );
+            let pattern = PROCESS_SPAWN_PATTERNS
+                .iter()
+                .find(|p| path_str.contains(*p))
+                .unwrap_or(&"process_spawn");
+            self.create_finding(
+                line,
+                pattern,
+                &format!("Process spawn type reference detected: {}", path_str),
             );
         }
         syn::visit::visit_expr_path(self, node);
@@ -2092,6 +2381,106 @@ const ENCODED_STRING_PATTERNS: &[&str] = &[
     "=",  // Single padding
 ];
 
+// ============================================================================
+// Build-Time Download Detection Constants
+// ============================================================================
+
+/// Patterns indicating build-time downloads of external resources.
+/// These are highly suspicious in build.rs files as they could fetch malicious code.
+const BUILD_DOWNLOAD_PATTERNS: &[&str] = &[
+    // Download-related function/crate names
+    "download",
+    "fetch",
+    "curl",
+    "wget",
+    // Archive extraction
+    "tar",
+    "untar",
+    "unzip",
+    "extract",
+    "decompress",
+    // Binary/executable download indicators
+    "prebuilt",
+    "prebuild",
+    "precompiled",
+    "binary",
+    "executable",
+    "artifact",
+    "release",
+    // Common download crates
+    "cc::Build",
+    "cmake",
+    "pkg-config",
+    // URL patterns suggesting downloads
+    "github.com/.*releases",
+    "githubusercontent",
+    "aws",
+    "s3.",
+    "cloudfront",
+    "cdn",
+];
+
+/// URL patterns that indicate downloading external resources
+const BUILD_DOWNLOAD_URL_PATTERNS: &[&str] = &[
+    // Protocol indicators
+    "http://",
+    "https://",
+    "ftp://",
+    // Common download hosts
+    "github.com",
+    "githubusercontent.com",
+    "gitlab.com",
+    "bitbucket.org",
+    "crates.io",
+    "docs.rs",
+    "rust-lang.org",
+    // Cloud storage that might host downloads
+    "s3.amazonaws.com",
+    "storage.googleapis.com",
+    "azureedge.net",
+    "cloudfront.net",
+    // File extension patterns in URLs suggesting downloads
+    ".tar.gz",
+    ".tar.xz",
+    ".tar.bz2",
+    ".zip",
+    ".exe",
+    ".dll",
+    ".so",
+    ".dylib",
+    ".a",
+    ".lib",
+    // Release/download path patterns
+    "/releases/download/",
+    "/releases/latest/",
+    "/download/",
+    "/dist/",
+    "/artifacts/",
+];
+
+/// Methods commonly used for downloading/fetching content
+const BUILD_DOWNLOAD_METHODS: &[&str] = &[
+    // HTTP client methods
+    "get",
+    "download",
+    "fetch",
+    "request",
+    // File writing after download
+    "copy_to",
+    "write_all",
+    "save",
+    "save_to",
+    // Archive extraction methods
+    "unpack",
+    "unpack_in",
+    "extract",
+    "extract_to",
+    "decompress",
+    // I/O operations on downloaded content
+    "read_to_end",
+    "bytes",
+];
+
 /// Visitor that walks the AST looking for obfuscation patterns.
 /// This detects potential hidden malicious code through encoding/decoding.
 struct ObfuscationVisitor<'a> {
@@ -2351,6 +2740,185 @@ impl<'a> Visit<'a> for ObfuscationVisitor<'a> {
                 line,
                 pattern,
                 &format!("Obfuscation type reference detected: {}", path_str),
+            );
+        }
+        syn::visit::visit_expr_path(self, node);
+    }
+}
+
+// ============================================================================
+// Build-Time Download Detection
+// ============================================================================
+
+/// Visitor that walks the AST looking for build-time download patterns.
+/// This detects attempts to download external resources during build time,
+/// which is highly suspicious as it could fetch and execute malicious code.
+struct BuildDownloadVisitor<'a> {
+    source: &'a str,
+    file_path: &'a str,
+    findings: Vec<Finding>,
+}
+
+impl<'a> BuildDownloadVisitor<'a> {
+    fn new(source: &'a str, file_path: &'a str) -> Self {
+        Self {
+            source,
+            file_path,
+            findings: Vec::new(),
+        }
+    }
+
+    /// Check if a path segment matches any build download pattern
+    fn matches_build_download_pattern(path_str: &str) -> bool {
+        let lower = path_str.to_lowercase();
+        for pattern in BUILD_DOWNLOAD_PATTERNS {
+            let pattern_lower = pattern.to_lowercase();
+            if lower.contains(&pattern_lower) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if a string literal looks like a URL that could be downloading content
+    fn looks_like_download_url(s: &str) -> bool {
+        // Check for URL patterns
+        for pattern in BUILD_DOWNLOAD_URL_PATTERNS {
+            if s.contains(pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Get the line number from a span
+    fn get_line_number(&self, span: proc_macro2::Span) -> usize {
+        span.start().line
+    }
+
+    /// Create a finding for a detected build download pattern
+    fn create_finding(&mut self, line: usize, pattern_found: &str, summary: &str) {
+        let (context_before, snippet, context_after) =
+            extract_snippet(self.source, line, line, 3);
+
+        let finding = Finding::new(
+            IssueType::BuildDownload,
+            default_severity(IssueType::BuildDownload), // High severity
+            self.file_path.to_string(),
+            line,
+            line,
+            snippet,
+            summary.to_string(),
+        )
+        .with_context(context_before, context_after)
+        .with_details(serde_json::json!({
+            "pattern": pattern_found,
+            "detection_type": "build_download"
+        }));
+
+        self.findings.push(finding);
+    }
+}
+
+impl<'a> Visit<'a> for BuildDownloadVisitor<'a> {
+    /// Check `use` statements for download-related crate imports
+    fn visit_item_use(&mut self, node: &'a ItemUse) {
+        let use_str = format_use_tree(&node.tree);
+        if Self::matches_build_download_pattern(&use_str) {
+            let line = self.get_line_number(node.use_token.span);
+            let pattern = BUILD_DOWNLOAD_PATTERNS
+                .iter()
+                .find(|p| use_str.to_lowercase().contains(&p.to_lowercase()))
+                .unwrap_or(&"download");
+            self.create_finding(
+                line,
+                pattern,
+                &format!("Build-time download crate import detected: {}", use_str),
+            );
+        }
+        syn::visit::visit_item_use(self, node);
+    }
+
+    /// Check function calls for download-related functions
+    fn visit_expr_call(&mut self, node: &'a ExprCall) {
+        if let Expr::Path(ExprPath { path, .. }) = &*node.func {
+            let path_str = format_path(path);
+            if Self::matches_build_download_pattern(&path_str) {
+                let line = self.get_line_number(path.segments.first().map_or_else(
+                    || proc_macro2::Span::call_site(),
+                    |s| s.ident.span(),
+                ));
+                let pattern = BUILD_DOWNLOAD_PATTERNS
+                    .iter()
+                    .find(|p| path_str.to_lowercase().contains(&p.to_lowercase()))
+                    .unwrap_or(&"download");
+                self.create_finding(
+                    line,
+                    pattern,
+                    &format!("Build-time download function call detected: {}", path_str),
+                );
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    /// Check method calls for download-related methods
+    fn visit_expr_method_call(&mut self, node: &'a ExprMethodCall) {
+        let method_name = node.method.to_string();
+
+        // Check if the method name matches download patterns
+        if BUILD_DOWNLOAD_METHODS.contains(&method_name.as_str()) {
+            let line = self.get_line_number(node.method.span());
+            self.create_finding(
+                line,
+                &method_name,
+                &format!("Build-time download method call detected: .{}", method_name),
+            );
+        }
+
+        syn::visit::visit_expr_method_call(self, node);
+    }
+
+    /// Check string literals for URLs that could indicate downloads
+    fn visit_expr_lit(&mut self, node: &'a ExprLit) {
+        if let syn::Lit::Str(lit_str) = &node.lit {
+            let s = lit_str.value();
+            if Self::looks_like_download_url(&s) {
+                let line = self.get_line_number(node.lit.span());
+                // Find which pattern matched
+                let pattern = BUILD_DOWNLOAD_URL_PATTERNS
+                    .iter()
+                    .find(|p| s.contains(*p))
+                    .unwrap_or(&"url");
+                self.create_finding(
+                    line,
+                    pattern,
+                    &format!("Potential download URL detected: \"{}\"",
+                        if s.len() > 80 { format!("{}...", &s[..77]) } else { s.clone() }),
+                );
+            }
+        }
+        syn::visit::visit_expr_lit(self, node);
+    }
+
+    /// Check path expressions for download type references
+    fn visit_expr_path(&mut self, node: &'a ExprPath) {
+        let path_str = format_path(&node.path);
+        if Self::matches_build_download_pattern(&path_str) {
+            let line = self.get_line_number(
+                node.path
+                    .segments
+                    .first()
+                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+            );
+            let pattern = BUILD_DOWNLOAD_PATTERNS
+                .iter()
+                .find(|p| path_str.to_lowercase().contains(&p.to_lowercase()))
+                .unwrap_or(&"download");
+            self.create_finding(
+                line,
+                pattern,
+                &format!("Build download type reference detected: {}", path_str),
             );
         }
         syn::visit::visit_expr_path(self, node);
@@ -4560,5 +5128,368 @@ fn cleanup(handle: *mut std::ffi::c_void) {
             !dynamic_lib_findings.is_empty(),
             "Should detect FreeLibrary call"
         );
+    }
+
+    // ========================================================================
+    // Process Spawn Detection Tests (Feature #14)
+    // ========================================================================
+
+    /// Test detection of nix::unistd::fork import
+    #[test]
+    fn test_detect_nix_fork_import() {
+        let source = r#"
+use nix::unistd::fork;
+
+fn main() {
+    match unsafe { fork() } {
+        Ok(ForkResult::Parent { child }) => println!("Parent"),
+        Ok(ForkResult::Child) => println!("Child"),
+        Err(_) => println!("Error"),
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect nix::unistd::fork import");
+        assert!(
+            process_findings.iter().any(|f| f.summary.contains("fork")),
+            "Summary should mention fork"
+        );
+    }
+
+    /// Test detection of libc::fork call
+    #[test]
+    fn test_detect_libc_fork_call() {
+        let source = r#"
+use libc;
+
+fn main() {
+    unsafe {
+        let pid = libc::fork();
+        if pid == 0 {
+            libc::execvp(cmd.as_ptr(), args.as_ptr());
+        }
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect libc::fork call");
+    }
+
+    /// Test that process spawn has Medium severity
+    #[test]
+    fn test_process_spawn_has_medium_severity() {
+        let source = r#"
+use nix::unistd::fork;
+
+fn main() {}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect process spawn");
+        assert_eq!(
+            process_findings[0].severity,
+            sus_core::Severity::Medium,
+            "Process spawn should have Medium severity"
+        );
+    }
+
+    /// Test detection of tokio::process import
+    #[test]
+    fn test_detect_tokio_process_import() {
+        let source = r#"
+use tokio::process::Command;
+
+async fn run_cmd() {
+    let child = Command::new("ls").spawn().unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect tokio::process import");
+    }
+
+    /// Test detection of execve call
+    #[test]
+    fn test_detect_execve_call() {
+        let source = r#"
+use nix::unistd::execve;
+use std::ffi::CString;
+
+fn main() {
+    let path = CString::new("/bin/sh").unwrap();
+    let args: Vec<CString> = vec![];
+    let env: Vec<CString> = vec![];
+    unsafe { execve(&path, &args, &env); }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect execve import");
+        assert!(
+            process_findings.iter().any(|f| f.summary.contains("execve")),
+            "Summary should mention execve"
+        );
+    }
+
+    /// Test detection of subprocess crate
+    #[test]
+    fn test_detect_subprocess_import() {
+        let source = r#"
+use subprocess::{Popen, PopenConfig};
+
+fn main() {
+    let mut p = Popen::create(&["ls", "-la"], PopenConfig::default()).unwrap();
+    p.wait().unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect subprocess crate");
+    }
+
+    /// Test detection of libc::posix_spawn
+    #[test]
+    fn test_detect_posix_spawn() {
+        let source = r#"
+use libc::{posix_spawn, posix_spawnattr_t, posix_spawn_file_actions_t};
+
+fn spawn_process() {
+    unsafe {
+        let mut pid: libc::pid_t = 0;
+        posix_spawn(&mut pid, path, file_actions, attrs, argv, envp);
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect posix_spawn");
+    }
+
+    /// Test detection of process spawn method calls (fork, wait, etc.)
+    #[test]
+    fn test_detect_process_spawn_methods() {
+        let source = r#"
+fn main() {
+    let pid = child.fork();
+    child.wait();
+    process.kill();
+    handle.terminate();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect process spawn methods");
+        // Should detect fork, wait, kill, terminate
+        assert!(process_findings.len() >= 3, "Should detect multiple spawn methods");
+    }
+
+    /// Test detection of async_std::process
+    #[test]
+    fn test_detect_async_std_process() {
+        let source = r#"
+use async_std::process::Command;
+
+async fn run() {
+    let output = Command::new("echo").arg("hello").output().await.unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect async_std::process");
+    }
+
+    /// Test detection of daemon/setsid (background process creation)
+    #[test]
+    fn test_detect_daemon_setsid() {
+        let source = r#"
+use nix::unistd::{daemon, setsid};
+
+fn daemonize() {
+    daemon(false, false).unwrap();
+    setsid().unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect daemon/setsid");
+    }
+
+    /// Test that process spawn detection captures context
+    #[test]
+    fn test_process_spawn_context_extraction() {
+        let source = r#"
+// Before context line 1
+// Before context line 2
+// Before context line 3
+use nix::unistd::fork;
+// After context line 1
+// After context line 2
+// After context line 3
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect fork import");
+        let finding = &process_findings[0];
+        assert!(!finding.context_before.is_empty(), "Should have context before");
+        assert!(!finding.context_after.is_empty(), "Should have context after");
+    }
+
+    /// Test detection of libc::system (dangerous system call)
+    #[test]
+    fn test_detect_libc_system() {
+        let source = r#"
+use libc::system;
+use std::ffi::CString;
+
+fn run_system_command() {
+    let cmd = CString::new("rm -rf /tmp/*").unwrap();
+    unsafe { system(cmd.as_ptr()); }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect libc::system");
+    }
+
+    /// Test detection of libc::popen (pipe to/from command)
+    #[test]
+    fn test_detect_libc_popen() {
+        let source = r#"
+use libc::{popen, pclose, FILE};
+
+fn read_command_output() {
+    unsafe {
+        let cmd = std::ffi::CString::new("ls -la").unwrap();
+        let mode = std::ffi::CString::new("r").unwrap();
+        let fp = popen(cmd.as_ptr(), mode.as_ptr());
+        pclose(fp);
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect libc::popen");
+    }
+
+    /// Test detection of duct crate for shell pipelines
+    #[test]
+    fn test_detect_duct_crate() {
+        let source = r#"
+use duct::cmd;
+
+fn run_pipeline() {
+    let output = cmd!("echo", "hello").read().unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect duct crate");
+    }
+
+    /// Test detection of Child process type reference
+    #[test]
+    fn test_detect_child_type_reference() {
+        let source = r#"
+use std::process::Child;
+
+fn handle_child(child: Child) {
+    let status = child.wait().unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let process_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ProcessSpawn)
+            .collect();
+
+        assert!(!process_findings.is_empty(), "Should detect Child type reference");
     }
 }
