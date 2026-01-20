@@ -162,30 +162,104 @@ cargo build --release
 
 ## Architecture
 
+The system is organized as a Cargo workspace with four crates that have clear separation of concerns:
+
 ```
-┌─────────────────┐     ┌─────────────────┐
-│  sus-crawler    │     │  sus-dashboard  │
-│                 │     │                 │
-│ - Fetch crates  │     │ - View findings │
-│ - Analyze code  │     │ - Search/filter │
-│ - Store results │     │ - Compare vers. │
-└────────┬────────┘     └────────┬────────┘
-         │                       │
-         │   ┌───────────────┐   │
-         └───┤  sus-core     ├───┘
-             │               │
-             │ - DB models   │
-             │ - Queries     │
-             │ - Types       │
-             └───────┬───────┘
-                     │
-         ┌───────────┴───────────┐
-         │    sus-detector       │
-         │                       │
-         │ - Pattern detection   │
-         │ - AST parsing         │
-         │ - Severity rating     │
-         └───────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         APPLICATIONS                                │
+├─────────────────────────────────┬───────────────────────────────────┤
+│       sus-crawler               │        sus-dashboard              │
+│                                 │                                   │
+│  • Web portal on port 3001      │  • Web dashboard on port 3002     │
+│  • Fetches crates from crates.io│  • Read-only viewing of findings  │
+│  • Downloads & extracts source  │  • Search, filter, paginate       │
+│  • Analyzes build.rs files      │  • Version comparison             │
+│  • Stores findings in database  │  • Syntax-highlighted code        │
+│  • SSE for live log streaming   │  • Historical tracking            │
+│  • Pause/resume controls        │  • API for all data access        │
+└────────────────┬────────────────┴───────────────┬───────────────────┘
+                 │                                │
+                 ▼                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         SHARED LIBRARIES                            │
+├─────────────────────────────────┬───────────────────────────────────┤
+│       sus-core                  │        sus-detector               │
+│                                 │                                   │
+│  • Database connection pool     │  • AST parsing with syn crate     │
+│  • SQLite queries & migrations  │  • Pattern matching logic         │
+│  • Shared type definitions:     │  • 12 pattern detectors:          │
+│    - Severity (Low/Med/High)    │    - Network calls                │
+│    - IssueType (12 categories)  │    - File system access           │
+│    - AnalysisStatus             │    - Shell commands               │
+│    - CrawlerStatus              │    - Process spawning             │
+│  • Model structs:               │    - Environment access           │
+│    - Crate, Version             │    - Dynamic library loading      │
+│    - AnalysisResult             │    - Unsafe blocks                │
+│    - CrawlerState, QueueItem    │    - Build-time downloads         │
+│                                 │    - Sensitive path access        │
+│                                 │    - Obfuscation patterns         │
+│                                 │    - Compiler flag manipulation   │
+│                                 │    - Macro code generation        │
+│                                 │  • Severity classification        │
+│                                 │  • Code snippet extraction        │
+└─────────────────────────────────┴───────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                         STORAGE                                      │
+│                                                                      │
+│  SQLite Database (./data/sus-repo-finder.db)                        │
+│                                                                      │
+│  Tables: crates, versions, analysis_results,                        │
+│          crawler_state, crawler_errors, crawler_queue               │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Crate Responsibilities
+
+| Crate | Type | Purpose |
+|-------|------|---------|
+| `sus-crawler` | Binary | Crawls crates.io, analyzes code, stores findings |
+| `sus-dashboard` | Binary | Serves web UI for viewing and searching findings |
+| `sus-core` | Library | Shared database access, models, and type definitions |
+| `sus-detector` | Library | Pattern detection using Rust AST analysis |
+
+### Data Flow
+
+```
+┌──────────────┐      ┌───────────────┐      ┌──────────────┐
+│  crates.io   │─────▶│  sus-crawler  │─────▶│   SQLite     │
+│   (source)   │      │  (analyzer)   │      │  (storage)   │
+└──────────────┘      └───────┬───────┘      └──────┬───────┘
+                              │                     │
+                              ▼                     ▼
+                      ┌───────────────┐      ┌──────────────┐
+                      │ sus-detector  │      │sus-dashboard │
+                      │ (detection)   │      │   (viewer)   │
+                      └───────────────┘      └──────────────┘
+
+1. Crawler fetches crate metadata and source from crates.io API
+2. Downloaded crates are extracted to a temporary directory
+3. sus-detector parses build.rs/proc-macro code using the syn crate
+4. Detected patterns are classified by type and severity
+5. Findings are stored in SQLite via sus-core database layer
+6. Dashboard queries the database to display findings to users
+```
+
+### Request Flow
+
+**Crawler Portal (localhost:3001):**
+```
+User → Browser → Axum (sus-crawler) → sus-detector → SQLite
+                        ↓
+                 htmx templates
+```
+
+**Dashboard (localhost:3002):**
+```
+User → Browser → Axum (sus-dashboard) → sus-core → SQLite
+                        ↓
+                 htmx templates
 ```
 
 ## License
