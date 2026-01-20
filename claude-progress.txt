@@ -471,3 +471,59 @@
 #### Current Completion Status:
 - Features passing: 10/170 (5.9%)
 - Feature #42 (Crawler portal status page loads) - PASSING
+
+
+## Session: 2026-01-20 (Agent - Feature #28)
+
+### Feature #28: Crate source download and extraction works
+**Status: PASSING**
+
+#### What was done:
+- Created `sus-crawler/src/downloader.rs` with `CrateDownloader` struct
+- Implemented `download_and_extract()` method that:
+  - Downloads crate tarballs from crates.io API
+  - Extracts gzipped tarballs to local cache directory
+  - Detects build.rs files in extracted crates
+  - Detects proc-macro crates by parsing Cargo.toml
+- Added test endpoint `/api/crawler/test-download/{name}/{version}` to API
+- Added `tempfile` as dev dependency for unit tests
+- Exported module from `sus-crawler/src/lib.rs`
+
+#### Files created/modified:
+- `sus-crawler/src/downloader.rs` - new module with CrateDownloader
+- `sus-crawler/src/lib.rs` - added downloader module export
+- `sus-crawler/src/api.rs` - added test endpoint and CrateDownloader to AppState
+- `sus-crawler/Cargo.toml` - added tempfile dev dependency
+- `Cargo.toml` - added tempfile to workspace dependencies
+
+#### Steps verified:
+1. ✅ Download crate source for test crate - Downloaded `once_cell@1.19.0`
+2. ✅ Verify tarball extracted to temp directory - Files exist at `./data/crate_cache/once_cell-1.19.0/`
+3. ✅ Verify Cargo.toml present in extracted files - Present in all test crates
+4. ✅ Verify build.rs accessible if present - Correctly detected in `libc@0.2.155`
+
+#### Test evidence:
+- API endpoint returns: `{"success": true, "extracted": {"crate_name": "once_cell", "version": "1.19.0", ...}}`
+- build.rs detection: `libc@0.2.155` shows `has_build_rs: true` with `build_rs_path`
+- proc-macro detection: `thiserror-impl@1.0.50` shows `is_proc_macro: true`
+- Unit tests written and all compile successfully
+
+#### Current Completion Status:
+- Features passing: 8/170 - Feature #28 now also passing
+- Feature #28 (Crate source download and extraction works) - PASSING
+
+[Testing] 2026-01-19 18:13:42 - Regression test for Feature #54 (Dashboard landing page loads)
+  - Navigated to http://localhost:3002/
+  - HTTP 200 confirmed - page loaded successfully
+  - Page title: 'Sus Repo Finder - Dashboard'
+  - UI elements verified:
+    - Hero section with title and description
+    - Stats cards: Crates Scanned, Total Findings, High Severity, Medium/Low
+    - Browse All Crates button present
+    - Recent Findings section with empty state
+    - Navigation bar with Dashboard and Crates links
+    - Search box present
+  - Screenshot saved: .playwright-mcp/regression-test-feature-54-landing.png
+  - Only console error: favicon.ico 404 (cosmetic, not functional)
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #54 (Dashboard landing page loads) still passing
