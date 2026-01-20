@@ -3902,3 +3902,72 @@ The search functionality was already implemented:
 #### Current Completion Status:
 - Features passing: 56/170 (32.9%)
 - Feature #60 (Dashboard quick search bar works) - PASSING ✅
+
+## Session: 2026-01-20 (Agent - Feature #69)
+
+### Feature #69: Crate list sort by recent analysis works
+**Status: PASSING** ✅
+
+#### Feature Description:
+Most recently analyzed first - verify that the crate list can be sorted by "Recently Analyzed" order, showing crates with the most recent `last_analyzed` timestamp first.
+
+#### Verification Steps:
+
+**Step 1: Create crates analyzed at different times** ✅
+- Used setup_test_last_analyzed.js to set different `last_analyzed` timestamps:
+  - serde: 0 minutes ago (most recent)
+  - tokio: 10 minutes ago
+  - anyhow: 20 minutes ago
+  - rand: 30 minutes ago
+  - regex: 40 minutes ago
+  - log: 50 minutes ago
+  - chrono: 60 minutes ago
+  - syn: 70 minutes ago
+  - quote: 80 minutes ago
+  - proc-macro2: 90 minutes ago (least recent of test data)
+
+**Step 2: Load crate list** ✅
+- Navigated to http://localhost:3002/crates
+- Page loaded with sort dropdown showing "Last Updated" (default)
+
+**Step 3: Sort by recent** ✅
+- Selected "Recently Analyzed" from dropdown
+- Page reloaded with URL: http://localhost:3002/crates?sort=recent&page=1
+- Dropdown correctly shows "Recently Analyzed" selected
+
+**Step 4: Verify most recent first** ✅
+- Crates displayed in correct order:
+  1. serde (most recent)
+  2. tokio
+  3. anyhow
+  4. rand
+  5. regex
+  6. log
+  7. chrono
+  8. syn
+  9. quote
+  10. proc-macro2
+- Crates without last_analyzed timestamps appear after (sorted by updated_at fallback)
+
+#### Additional Verification:
+- Pagination preserves sort parameter ✅
+  - Next page URL: /crates?page=2&per_page=10&sort=recent
+  - Previous page URL: /crates?page=1&per_page=10&sort=recent
+- Sort dropdown remains on "Recently Analyzed" across page navigation ✅
+
+#### Implementation Analysis:
+The sorting functionality is implemented in:
+- `sus-core/src/db.rs`: `get_crates_paginated_sorted()` function with "recent" case (lines 212-234)
+- SQL: `ORDER BY MAX(v.last_analyzed) DESC NULLS LAST, c.updated_at DESC`
+- `sus-dashboard/src/api.rs`: Crate list handler uses sorted query (line 173)
+- Template: `crate_list.html` has dropdown with "Recently Analyzed" option (line 33)
+
+#### Test Evidence:
+- Screenshots:
+  - .playwright-mcp/feature-69-sort-by-recent-working.png
+  - .playwright-mcp/feature-69-sort-pagination-preserved.png
+- Console errors: favicon 404 only (cosmetic), Tailwind CDN warning (expected in dev)
+
+#### Current Completion Status:
+- Features passing: 56/170 (32.9%)
+- Feature #69 (Crate list sort by recent analysis works) - PASSING ✅
