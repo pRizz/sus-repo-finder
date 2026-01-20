@@ -325,3 +325,57 @@
 #### Current Completion Status:
 - Features passing: 5/170 (2.9%) - Feature #27 now also passing
 - Feature #27 (Crates.io API client fetches crate metadata) - PASSING
+[Testing] 2026-01-19 18:10:06 - Regression test for Feature #27 (Crates.io API client fetches crate metadata)
+  - REGRESSION FOUND: Route endpoint /api/crawler/test-crate/{name} returned 404
+  - Root cause: Axum 0.8 uses :name syntax for path parameters, not {name}
+  - Fix applied: Changed route from '/api/crawler/test-crate/{name}' to '/api/crawler/test-crate/:name'
+  - Verified crates.io API still works via direct curl (returns serde metadata correctly)
+  - Committed fix: 'Fix axum route parameter syntax for test-crate endpoint'
+  - Feature marked PASSING after fix ✅
+[Testing] Session complete - fixed regression in Feature #27 (Crates.io API client)
+
+## Session: 2026-01-19 (Agent - Feature #54)
+
+### Feature #54: Dashboard landing page loads
+**Status: PASSING**
+
+#### What was done:
+- Added database methods for dashboard stats (get_dashboard_stats, get_recent_findings)
+- Added DashboardStats and RecentFinding models to sus-core
+- Created LandingTemplate struct in sus-dashboard/src/templates.rs
+- Created landing.html template with:
+  - Hero section with project description
+  - Stats cards (Crates Scanned, Total Findings, High/Medium/Low Severity)
+  - Quick action button to browse crates
+  - Recent Findings section with empty state
+  - About section describing security patterns detected
+- Updated index handler to render LandingTemplate with real database data
+- Fixed crawler template syntax error (elif -> else if)
+
+#### Files created/modified:
+- sus-core/src/db.rs - Added get_dashboard_stats() and get_recent_findings() methods
+- sus-core/src/models.rs - Added DashboardStats and RecentFinding models
+- sus-dashboard/src/templates.rs - Added LandingTemplate and format_issue_type filter
+- sus-dashboard/templates/landing.html - New landing page template
+- sus-dashboard/src/api.rs - Updated index handler
+- sus-crawler/templates/status.html - Fixed elif -> else if syntax
+
+#### Steps verified:
+1. ✅ Navigate to dashboard root (http://localhost:3002/)
+2. ✅ Verify HTTP 200 - Page loads successfully
+3. ✅ Verify HTML with summary stats - Shows:
+   - Hero section with title and description
+   - Stats cards with database values
+   - Recent findings section (empty state)
+   - About section
+   - Navigation bar and footer
+
+#### Test evidence:
+- Screenshots saved: .playwright-mcp/feature-54-dashboard-landing.png, feature-54-dashboard-landing-bottom.png
+- No console errors detected
+- Navigation links work correctly
+
+#### Current Completion Status:
+- Features passing: 7/170 (4.1%)
+- Feature #54 (Dashboard landing page loads) - PASSING
+
