@@ -312,9 +312,17 @@ impl Detector {
         visitor.findings
     }
 
-    fn detect_obfuscation(&self, _ast: &syn::File, _source: &str, _path: &str) -> Vec<Finding> {
-        // TODO: Implement obfuscation detection
-        Vec::new()
+    /// Detect obfuscation patterns that could indicate hidden malicious code.
+    ///
+    /// Looks for:
+    /// - Base64 decoding (base64 crate, STANDARD.decode, etc.)
+    /// - Hex decoding (hex crate, FromHex trait)
+    /// - String encoding/decoding that could hide payloads
+    /// - Unusual byte sequences that look like encoded data
+    fn detect_obfuscation(&self, ast: &syn::File, source: &str, path: &str) -> Vec<Finding> {
+        let mut visitor = ObfuscationVisitor::new(source, path);
+        visitor.visit_file(ast);
+        visitor.findings
     }
 
     fn detect_compiler_flags(&self, _source: &str, _path: &str) -> Vec<Finding> {
@@ -1692,6 +1700,340 @@ impl<'a> Visit<'a> for SensitivePathVisitor<'a> {
         }
 
         syn::visit::visit_macro(self, node);
+    }
+}
+
+// ============================================================================
+// Obfuscation Detection
+// ============================================================================
+
+/// Obfuscation-related crate and module patterns to detect.
+/// These are commonly used to encode/decode data that could hide malicious payloads.
+const OBFUSCATION_PATTERNS: &[&str] = &[
+    // Base64 encoding/decoding
+    "base64",
+    "base64::decode",
+    "base64::encode",
+    "STANDARD",
+    "STANDARD_NO_PAD",
+    "URL_SAFE",
+    "URL_SAFE_NO_PAD",
+    "Engine",
+    "GeneralPurpose",
+    // Hex encoding/decoding
+    "hex",
+    "hex::decode",
+    "hex::encode",
+    "FromHex",
+    "ToHex",
+    "from_hex",
+    "to_hex",
+    // Other encoding schemes
+    "data_encoding",
+    "base32",
+    "base58",
+    "bs58",
+    // Compression that could hide payloads
+    "flate2",
+    "zlib",
+    "gzip",
+    "bzip2",
+    "lz4",
+    "xz",
+    "zstd",
+    // XOR and simple encryption
+    "xor",
+    "xor_cipher",
+    // Encryption (could be used for obfuscation)
+    "aes",
+    "chacha",
+    "crypto",
+];
+
+/// Specific obfuscation method names that are suspicious in build scripts
+const OBFUSCATION_METHODS: &[&str] = &[
+    "decode",
+    "encode",
+    "from_hex",
+    "to_hex",
+    "from_base64",
+    "to_base64",
+    "decompress",
+    "compress",
+    "decrypt",
+    "encrypt",
+];
+
+/// Patterns for literal strings that look like encoded data
+const ENCODED_STRING_PATTERNS: &[&str] = &[
+    // Base64 alphabet characters (long runs suggest encoding)
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",
+    "==", // Base64 padding
+    "=",  // Single padding
+];
+
+/// Visitor that walks the AST looking for obfuscation patterns.
+/// This detects potential hidden malicious code through encoding/decoding.
+struct ObfuscationVisitor<'a> {
+    source: &'a str,
+    file_path: &'a str,
+    findings: Vec<Finding>,
+}
+
+impl<'a> ObfuscationVisitor<'a> {
+    fn new(source: &'a str, file_path: &'a str) -> Self {
+        Self {
+            source,
+            file_path,
+            findings: Vec::new(),
+        }
+    }
+
+    /// Check if a path segment matches any obfuscation pattern
+    fn matches_obfuscation_pattern(path_str: &str) -> bool {
+        for pattern in OBFUSCATION_PATTERNS {
+            if path_str.contains(pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if a string looks like base64 encoded data
+    fn looks_like_base64(s: &str) -> bool {
+        if s.len() < 20 {
+            return false;
+        }
+        // Base64 strings are typically multiples of 4 and contain only valid characters
+        let base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+        let valid_chars = s.chars().all(|c| base64_chars.contains(c));
+        let reasonable_length = s.len() >= 24 && s.len() % 4 == 0;
+        valid_chars && reasonable_length
+    }
+
+    /// Check if a string looks like hex encoded data
+    fn looks_like_hex(s: &str) -> bool {
+        if s.len() < 20 {
+            return false;
+        }
+        // Hex strings are even length and contain only hex characters
+        let hex_chars = "0123456789abcdefABCDEF";
+        let valid_chars = s.chars().all(|c| hex_chars.contains(c));
+        let even_length = s.len() % 2 == 0;
+        valid_chars && even_length && s.len() >= 32
+    }
+
+    /// Check if byte array looks like encoded data
+    fn looks_like_encoded_bytes(bytes: &[u8]) -> bool {
+        // Check for long sequences of seemingly random bytes
+        // This is a heuristic - encoded data tends to have high entropy
+        if bytes.len() < 32 {
+            return false;
+        }
+        // Count unique byte values - encoded data tends to use many different bytes
+        let mut seen = [false; 256];
+        let mut unique_count = 0;
+        for &b in bytes {
+            if !seen[b as usize] {
+                seen[b as usize] = true;
+                unique_count += 1;
+            }
+        }
+        // If more than 50% of possible bytes are used, it might be encoded data
+        unique_count > 128
+    }
+
+    /// Get the line number from a span
+    fn get_line_number(&self, span: proc_macro2::Span) -> usize {
+        span.start().line
+    }
+
+    /// Create a finding for a detected obfuscation pattern
+    fn create_finding(&mut self, line: usize, pattern_found: &str, summary: &str) {
+        let (context_before, snippet, context_after) =
+            extract_snippet(self.source, line, line, 3);
+
+        let finding = Finding::new(
+            IssueType::Obfuscation,
+            default_severity(IssueType::Obfuscation), // High severity
+            self.file_path.to_string(),
+            line,
+            line,
+            snippet,
+            summary.to_string(),
+        )
+        .with_context(context_before, context_after)
+        .with_details(serde_json::json!({
+            "pattern": pattern_found,
+            "detection_type": "obfuscation"
+        }));
+
+        self.findings.push(finding);
+    }
+
+    /// Extract string literal value from a syn::Lit
+    fn extract_string_literal(lit: &syn::Lit) -> Option<String> {
+        if let syn::Lit::Str(lit_str) = lit {
+            Some(lit_str.value())
+        } else {
+            None
+        }
+    }
+
+    /// Extract byte array from a syn::Lit
+    fn extract_byte_string(lit: &syn::Lit) -> Option<Vec<u8>> {
+        if let syn::Lit::ByteStr(lit_bytes) = lit {
+            Some(lit_bytes.value())
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> Visit<'a> for ObfuscationVisitor<'a> {
+    /// Check `use` statements for obfuscation crate imports
+    fn visit_item_use(&mut self, node: &'a ItemUse) {
+        let use_str = format_use_tree(&node.tree);
+        if Self::matches_obfuscation_pattern(&use_str) {
+            let line = self.get_line_number(node.use_token.span);
+            let pattern = OBFUSCATION_PATTERNS
+                .iter()
+                .find(|p| use_str.contains(*p))
+                .unwrap_or(&"obfuscation");
+            self.create_finding(
+                line,
+                pattern,
+                &format!("Obfuscation-related import detected: {} (could be used to hide malicious code)", use_str),
+            );
+        }
+        syn::visit::visit_item_use(self, node);
+    }
+
+    /// Check function calls for obfuscation-related functions
+    fn visit_expr_call(&mut self, node: &'a ExprCall) {
+        if let Expr::Path(ExprPath { path, .. }) = &*node.func {
+            let path_str = format_path(path);
+
+            if Self::matches_obfuscation_pattern(&path_str) {
+                let line = self.get_line_number(path.segments.first().map_or_else(
+                    || proc_macro2::Span::call_site(),
+                    |s| s.ident.span(),
+                ));
+                let pattern = OBFUSCATION_PATTERNS
+                    .iter()
+                    .find(|p| path_str.contains(*p))
+                    .unwrap_or(&"obfuscation");
+                self.create_finding(
+                    line,
+                    pattern,
+                    &format!("Obfuscation function call detected: {}", path_str),
+                );
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    /// Check method calls for obfuscation-related methods
+    fn visit_expr_method_call(&mut self, node: &'a ExprMethodCall) {
+        let method_name = node.method.to_string();
+
+        // Check for obfuscation method names
+        if OBFUSCATION_METHODS.contains(&method_name.as_str()) {
+            let line = self.get_line_number(node.method.span());
+
+            // Check if this looks like base64/hex decoding
+            let receiver_str = if let Expr::Path(ExprPath { path, .. }) = &*node.receiver {
+                format_path(path)
+            } else {
+                String::new()
+            };
+
+            let summary = if receiver_str.contains("base64") || receiver_str.contains("STANDARD") {
+                format!("Base64 decoding detected: {}.{}() - could be hiding malicious payload", receiver_str, method_name)
+            } else if receiver_str.contains("hex") {
+                format!("Hex decoding detected: {}.{}() - could be hiding malicious payload", receiver_str, method_name)
+            } else {
+                format!("Encoding/decoding method call detected: .{}()", method_name)
+            };
+
+            self.create_finding(line, &method_name, &summary);
+        }
+
+        // Also check if receiver is obfuscation-related
+        if let Expr::Path(ExprPath { path, .. }) = &*node.receiver {
+            let path_str = format_path(path);
+            if Self::matches_obfuscation_pattern(&path_str) {
+                let line = self.get_line_number(node.method.span());
+                self.create_finding(
+                    line,
+                    &path_str,
+                    &format!("Obfuscation method call detected: {}.{}()", path_str, method_name),
+                );
+            }
+        }
+
+        syn::visit::visit_expr_method_call(self, node);
+    }
+
+    /// Check literal expressions for encoded data
+    fn visit_expr_lit(&mut self, node: &'a ExprLit) {
+        // Check string literals for base64/hex patterns
+        if let Some(s) = Self::extract_string_literal(&node.lit) {
+            if Self::looks_like_base64(&s) {
+                let line = self.get_line_number(node.lit.span());
+                self.create_finding(
+                    line,
+                    "base64_string",
+                    &format!("String literal looks like base64 encoded data: \"{}...\" (length: {})",
+                        &s[..s.len().min(40)], s.len()),
+                );
+            } else if Self::looks_like_hex(&s) {
+                let line = self.get_line_number(node.lit.span());
+                self.create_finding(
+                    line,
+                    "hex_string",
+                    &format!("String literal looks like hex encoded data: \"{}...\" (length: {})",
+                        &s[..s.len().min(40)], s.len()),
+                );
+            }
+        }
+
+        // Check byte string literals for suspicious patterns
+        if let Some(bytes) = Self::extract_byte_string(&node.lit) {
+            if Self::looks_like_encoded_bytes(&bytes) {
+                let line = self.get_line_number(node.lit.span());
+                self.create_finding(
+                    line,
+                    "encoded_bytes",
+                    &format!("Byte literal looks like encoded data (length: {} bytes, high entropy)", bytes.len()),
+                );
+            }
+        }
+
+        syn::visit::visit_expr_lit(self, node);
+    }
+
+    /// Check path expressions for obfuscation type references
+    fn visit_expr_path(&mut self, node: &'a ExprPath) {
+        let path_str = format_path(&node.path);
+        if Self::matches_obfuscation_pattern(&path_str) {
+            let line = self.get_line_number(
+                node.path
+                    .segments
+                    .first()
+                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+            );
+            let pattern = OBFUSCATION_PATTERNS
+                .iter()
+                .find(|p| path_str.contains(*p))
+                .unwrap_or(&"obfuscation");
+            self.create_finding(
+                line,
+                pattern,
+                &format!("Obfuscation type reference detected: {}", path_str),
+            );
+        }
+        syn::visit::visit_expr_path(self, node);
     }
 }
 
@@ -3230,5 +3572,336 @@ fn steal_git_creds() {
             .collect();
 
         assert!(!sensitive_findings.is_empty(), "Should detect .git-credentials access");
+    }
+
+    // ========================================================================
+    // Obfuscation Detection Tests
+    // ========================================================================
+
+    /// Test detection of base64 crate import
+    #[test]
+    fn test_detect_base64_import() {
+        let source = r#"
+use base64;
+
+fn decode_payload() {
+    let decoded = base64::decode("SGVsbG8gV29ybGQ=").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .collect();
+
+        assert!(!obfuscation_findings.is_empty(), "Should detect base64 import");
+        assert!(
+            obfuscation_findings.iter().any(|f| f.summary.contains("base64")),
+            "Summary should mention base64"
+        );
+    }
+
+    /// Test detection of hex crate import
+    #[test]
+    fn test_detect_hex_import() {
+        let source = r#"
+use hex;
+
+fn decode_payload() {
+    let decoded = hex::decode("48656c6c6f").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .collect();
+
+        assert!(!obfuscation_findings.is_empty(), "Should detect hex import");
+        assert!(
+            obfuscation_findings.iter().any(|f| f.summary.contains("hex")),
+            "Summary should mention hex"
+        );
+    }
+
+    /// Test that obfuscation patterns have High severity (as per spec)
+    #[test]
+    fn test_obfuscation_has_high_severity() {
+        let source = r#"
+use base64::Engine;
+
+fn decode() {
+    let data = STANDARD.decode("SGVsbG8=");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .collect();
+
+        assert!(!obfuscation_findings.is_empty(), "Should detect obfuscation pattern");
+        assert_eq!(
+            obfuscation_findings[0].severity,
+            sus_core::Severity::High,
+            "Obfuscation should have High severity"
+        );
+    }
+
+    /// Test detection of base64 decode method call
+    #[test]
+    fn test_detect_base64_decode_method() {
+        let source = r#"
+fn decode_malware() {
+    let encoded = "SGVsbG8gV29ybGQ=";
+    let payload = STANDARD.decode(encoded);
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .filter(|f| f.summary.contains("decode"))
+            .collect();
+
+        assert!(!obfuscation_findings.is_empty(), "Should detect .decode() method");
+    }
+
+    /// Test detection of hex decode method call
+    #[test]
+    fn test_detect_hex_decode_method() {
+        let source = r#"
+fn decode_hex() {
+    let hex_str = "48656c6c6f";
+    let bytes = some_thing.decode(hex_str);
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .filter(|f| f.summary.contains("decode"))
+            .collect();
+
+        assert!(!obfuscation_findings.is_empty(), "Should detect decode method");
+    }
+
+    /// Test detection of base64 encoded string literals
+    #[test]
+    fn test_detect_base64_string_literal() {
+        let source = r#"
+fn hidden_payload() {
+    // This is a base64 encoded string (min 24 chars, multiple of 4)
+    let encoded = "SGVsbG8gV29ybGQgV2hhdCBJcyBVcA==";
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .filter(|f| f.summary.contains("base64"))
+            .collect();
+
+        assert!(!obfuscation_findings.is_empty(), "Should detect base64-like string literal");
+    }
+
+    /// Test detection of hex encoded string literals
+    #[test]
+    fn test_detect_hex_string_literal() {
+        let source = r#"
+fn hidden_hex() {
+    // This is a hex encoded string (at least 32 chars, even length)
+    let encoded = "48656c6c6f20576f726c6420576861742049732055700000";
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .filter(|f| f.summary.contains("hex"))
+            .collect();
+
+        assert!(!obfuscation_findings.is_empty(), "Should detect hex-like string literal");
+    }
+
+    /// Test detection of compression crates (flate2, gzip)
+    #[test]
+    fn test_detect_compression_import() {
+        let source = r#"
+use flate2::read::GzDecoder;
+
+fn decompress_payload() {
+    let decoder = GzDecoder::new(data);
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .collect();
+
+        assert!(!obfuscation_findings.is_empty(), "Should detect flate2/compression import");
+    }
+
+    /// Test detection of encryption crate imports
+    #[test]
+    fn test_detect_encryption_import() {
+        let source = r#"
+use aes::Aes256;
+
+fn decrypt_payload() {
+    let cipher = Aes256::new(&key);
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .collect();
+
+        assert!(!obfuscation_findings.is_empty(), "Should detect aes/encryption import");
+    }
+
+    /// Test that context is extracted for obfuscation findings
+    #[test]
+    fn test_obfuscation_context_extraction() {
+        let source = r#"// Line 1
+// Line 2
+// Line 3
+use base64;
+// Line 5
+// Line 6
+// Line 7
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .collect();
+
+        assert!(!obfuscation_findings.is_empty(), "Should detect base64 import");
+        let finding = &obfuscation_findings[0];
+
+        // Context should include surrounding lines
+        assert!(
+            !finding.context_before.is_empty() || !finding.context_after.is_empty(),
+            "Should have some context"
+        );
+    }
+
+    /// Test that normal strings are not flagged as obfuscation
+    #[test]
+    fn test_normal_strings_not_flagged() {
+        let source = r#"
+fn normal_code() {
+    let message = "Hello, World!";
+    let path = "/usr/local/bin";
+    let number = "12345";
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .collect();
+
+        // Normal strings should not trigger obfuscation detection
+        assert!(
+            obfuscation_findings.is_empty(),
+            "Normal strings should not be flagged as obfuscation, found: {:?}",
+            obfuscation_findings.iter().map(|f| &f.summary).collect::<Vec<_>>()
+        );
+    }
+
+    /// Test detection of bs58 (base58) import
+    #[test]
+    fn test_detect_bs58_import() {
+        let source = r#"
+use bs58;
+
+fn decode_crypto() {
+    let decoded = bs58::decode("3yMApqCuCjXDWPrbjfR5mjCPTHqFG8Pux1TxQrEM35jj").into_vec().unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .collect();
+
+        assert!(!obfuscation_findings.is_empty(), "Should detect bs58/base58 import");
+    }
+
+    /// Test detection of xor cipher patterns
+    #[test]
+    fn test_detect_xor_import() {
+        let source = r#"
+use xor_cipher;
+
+fn decrypt_xor() {
+    let data = xor_cipher::decrypt(&key, &encrypted);
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .collect();
+
+        assert!(!obfuscation_findings.is_empty(), "Should detect xor_cipher import");
+    }
+
+    /// Test detection of line numbers for obfuscation findings
+    #[test]
+    fn test_obfuscation_line_numbers() {
+        let source = r#"
+// Line 2
+// Line 3
+use base64;
+// Line 5
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let obfuscation_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::Obfuscation)
+            .collect();
+
+        assert!(!obfuscation_findings.is_empty(), "Should detect base64 import");
+        let finding = &obfuscation_findings[0];
+
+        // Line number should be 4 (1-indexed, where "use base64;" is)
+        assert_eq!(
+            finding.line_start, 4,
+            "Line number should be 4, got {}",
+            finding.line_start
+        );
     }
 }
