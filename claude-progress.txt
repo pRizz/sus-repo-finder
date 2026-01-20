@@ -5717,3 +5717,67 @@ The sus-detector crate has excellent documentation that:
 - Features passing: 83/170 (48.8%)
 - Feature #136 (Code comments explain complex logic) - PASSING ✅
 
+[Testing] Feature #16 (Pattern detector identifies dynamic library loading) verified - still passing
+[Testing] Session complete - verified feature #16 (no regression found)
+[Testing] Feature #96 (Success color is green) verified - still passing
+[Testing] Session complete - verified feature #96 (no regression found)
+[Testing] Feature #153 (Cargo clippy passes) verified - still passing (code review + build verification)
+[Testing] Session complete - verified feature #153 (no regression found)
+
+## Session: 2026-01-20 (Agent - Feature #157)
+
+### Feature #157: Breadcrumbs show navigation path
+**Status: PASSING** ✅
+
+#### Feature Description:
+User knows their location - Breadcrumbs show navigation path through the application.
+
+#### Implementation:
+
+**Step 1: Added breadcrumb block to base template**
+- Modified `sus-dashboard/templates/base.html` to include a `{% block breadcrumbs %}` placeholder
+- This allows child templates to optionally define breadcrumb navigation
+
+**Step 2: Added breadcrumbs to crate_list.html**
+- Path: Home > Crates
+- "Home" is a clickable link to `/`
+- "Crates" is displayed as text (current page, not a link)
+- Uses proper `aria-label="Breadcrumb"` for accessibility
+
+**Step 3: Added breadcrumbs to crate_detail.html**
+- Path: Home > Crates > {crate_name}
+- "Home" links to `/`
+- "Crates" links to `/crates`
+- {crate_name} is displayed as text (current page)
+- Uses `aria-current="page"` on the current page element
+
+#### Verification Steps:
+
+**Step 1: Navigate Home > Crates > test-crate** ✅
+- Started at http://localhost:3012/ (Dashboard home)
+- Clicked "Crates" in navigation
+- Clicked on "anyhow" crate from list
+- Arrived at http://localhost:3012/crates/anyhow
+
+**Step 2: Verify breadcrumb shows path** ✅
+- On crate list: Breadcrumb shows "Home > Crates"
+- On crate detail: Breadcrumb shows "Home > Crates > anyhow"
+- Breadcrumbs use proper chevron separators (SVG icons)
+
+**Step 3: Verify breadcrumb links work** ✅
+- "Home" link navigates to http://localhost:3012/
+- "Crates" link navigates to http://localhost:3012/crates
+- All navigation works correctly
+
+#### Test Evidence:
+- Screenshots:
+  - feature-157-breadcrumbs-crates-list.png - Crates page showing "Home > Crates" breadcrumb
+  - feature-157-breadcrumbs-crate-detail.png - Crate detail showing "Home > Crates > anyhow" breadcrumb
+- Console errors: None
+
+#### Commit:
+- ee8cd4f: Implement Feature #157: Breadcrumbs show navigation path
+
+#### Current Completion Status:
+- Features passing: 84/170 (49.4%)
+- Feature #157 (Breadcrumbs show navigation path) - PASSING ✅
