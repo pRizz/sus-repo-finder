@@ -6,7 +6,7 @@
 use crate::patterns::{default_severity, extract_snippet, Finding};
 use sus_core::IssueType;
 use syn::visit::Visit;
-use syn::{Expr, ExprCall, ExprMethodCall, ExprPath, ItemUse, UseTree};
+use syn::{Expr, ExprCall, ExprMethodCall, ExprPath, ExprUnsafe, ItemUse, UseTree};
 
 /// Network-related module and function patterns to detect.
 /// These indicate potential network I/O in build scripts which could be suspicious.
@@ -288,9 +288,16 @@ impl Detector {
         Vec::new()
     }
 
-    fn detect_unsafe_blocks(&self, _ast: &syn::File, _source: &str, _path: &str) -> Vec<Finding> {
-        // TODO: Implement unsafe block detection
-        Vec::new()
+    /// Detect unsafe blocks that could hide malicious behavior.
+    ///
+    /// Looks for:
+    /// - Large unsafe blocks (many statements indicate complex unsafe code)
+    /// - Raw pointer manipulation (deref, offset, as *const, as *mut)
+    /// - FFI calls within unsafe blocks
+    fn detect_unsafe_blocks(&self, ast: &syn::File, source: &str, path: &str) -> Vec<Finding> {
+        let mut visitor = UnsafeBlockVisitor::new(source, path);
+        visitor.visit_file(ast);
+        visitor.findings
     }
 
     fn detect_sensitive_paths(&self, _ast: &syn::File, _source: &str, _path: &str) -> Vec<Finding> {
@@ -1659,5 +1666,318 @@ fn main() {
             .collect();
 
         assert!(!shell_findings.is_empty(), "Should detect /usr/bin/env command");
+    }
+
+    // ========================================================================
+    // Environment Variable Access Detection Tests
+    // ========================================================================
+
+    /// Test detection of std::env import
+    #[test]
+    fn test_detect_std_env_import() {
+        let source = r#"
+use std::env;
+
+fn main() {
+    println!("Hello");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let env_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::EnvAccess)
+            .collect();
+
+        assert!(!env_findings.is_empty(), "Should detect std::env import");
+        assert!(
+            env_findings[0].summary.contains("std::env"),
+            "Summary should mention std::env"
+        );
+    }
+
+    /// Test detection of env::var() function call
+    #[test]
+    fn test_detect_env_var_call() {
+        let source = r#"
+use std::env;
+
+fn main() {
+    let value = env::var("MY_VAR").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let env_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::EnvAccess)
+            .collect();
+
+        assert!(!env_findings.is_empty(), "Should detect env::var() call");
+        assert!(
+            env_findings.iter().any(|f| f.summary.contains("MY_VAR")),
+            "Summary should mention the variable name"
+        );
+    }
+
+    /// Test that general env access has Low severity (as per spec)
+    #[test]
+    fn test_env_access_has_low_severity() {
+        let source = r#"
+use std::env;
+
+fn main() {
+    let path = env::var("PATH").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let env_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::EnvAccess)
+            .filter(|f| f.summary.contains("PATH"))
+            .collect();
+
+        assert!(!env_findings.is_empty(), "Should detect env access");
+        assert_eq!(
+            env_findings[0].severity,
+            sus_core::Severity::Low,
+            "General env access should have Low severity"
+        );
+    }
+
+    /// Test that sensitive env var access has High severity
+    #[test]
+    fn test_sensitive_env_var_has_high_severity() {
+        let source = r#"
+use std::env;
+
+fn main() {
+    let token = env::var("GITHUB_TOKEN").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let env_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::EnvAccess)
+            .filter(|f| f.summary.contains("GITHUB_TOKEN"))
+            .collect();
+
+        assert!(!env_findings.is_empty(), "Should detect GITHUB_TOKEN access");
+        assert_eq!(
+            env_findings[0].severity,
+            sus_core::Severity::High,
+            "Sensitive env var access should have High severity"
+        );
+    }
+
+    /// Test detection of AWS credentials access
+    #[test]
+    fn test_detect_aws_credentials_access() {
+        let source = r#"
+use std::env;
+
+fn exfiltrate() {
+    let key = env::var("AWS_SECRET_ACCESS_KEY").unwrap();
+    let id = env::var("AWS_ACCESS_KEY_ID").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let env_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::EnvAccess)
+            .filter(|f| f.summary.contains("AWS"))
+            .collect();
+
+        assert!(
+            env_findings.len() >= 2,
+            "Should detect both AWS credential accesses"
+        );
+        assert!(
+            env_findings.iter().all(|f| f.severity == sus_core::Severity::High),
+            "All AWS credential accesses should be High severity"
+        );
+    }
+
+    /// Test detection of various sensitive env vars
+    #[test]
+    fn test_detect_various_sensitive_vars() {
+        // Test DATABASE_URL
+        let source_db = r#"
+use std::env;
+fn main() { let db = env::var("DATABASE_URL").unwrap(); }
+"#;
+        let detector = Detector::new();
+        let findings_db = detector.analyze(source_db, "build.rs");
+        let env_findings_db: Vec<_> = findings_db
+            .iter()
+            .filter(|f| f.issue_type == IssueType::EnvAccess && f.summary.contains("DATABASE_URL"))
+            .collect();
+        assert!(
+            !env_findings_db.is_empty() && env_findings_db[0].severity == sus_core::Severity::High,
+            "DATABASE_URL should be High severity"
+        );
+
+        // Test SSH_AUTH_SOCK
+        let source_ssh = r#"
+use std::env;
+fn main() { let sock = env::var("SSH_AUTH_SOCK").unwrap(); }
+"#;
+        let findings_ssh = detector.analyze(source_ssh, "build.rs");
+        let env_findings_ssh: Vec<_> = findings_ssh
+            .iter()
+            .filter(|f| f.issue_type == IssueType::EnvAccess && f.summary.contains("SSH_AUTH_SOCK"))
+            .collect();
+        assert!(
+            !env_findings_ssh.is_empty() && env_findings_ssh[0].severity == sus_core::Severity::High,
+            "SSH_AUTH_SOCK should be High severity"
+        );
+
+        // Test NPM_TOKEN
+        let source_npm = r#"
+use std::env;
+fn main() { let token = env::var("NPM_TOKEN").unwrap(); }
+"#;
+        let findings_npm = detector.analyze(source_npm, "build.rs");
+        let env_findings_npm: Vec<_> = findings_npm
+            .iter()
+            .filter(|f| f.issue_type == IssueType::EnvAccess && f.summary.contains("NPM_TOKEN"))
+            .collect();
+        assert!(
+            !env_findings_npm.is_empty() && env_findings_npm[0].severity == sus_core::Severity::High,
+            "NPM_TOKEN should be High severity"
+        );
+    }
+
+    /// Test that context is extracted for env access
+    #[test]
+    fn test_env_access_context_extraction() {
+        let source = r#"// Line 1
+// Line 2
+// Line 3
+use std::env;
+// Line 5
+// Line 6
+// Line 7
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let env_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::EnvAccess)
+            .collect();
+
+        assert!(!env_findings.is_empty(), "Should detect env import");
+        let finding = &env_findings[0];
+
+        // Context should include surrounding lines
+        assert!(
+            !finding.context_before.is_empty() || !finding.context_after.is_empty(),
+            "Should have some context"
+        );
+    }
+
+    /// Test detection of env::var_os() function
+    #[test]
+    fn test_detect_env_var_os() {
+        let source = r#"
+use std::env;
+
+fn main() {
+    let value = env::var_os("MY_VAR");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let env_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::EnvAccess)
+            .filter(|f| f.summary.contains("MY_VAR"))
+            .collect();
+
+        assert!(!env_findings.is_empty(), "Should detect env::var_os() call");
+    }
+
+    /// Test detection of env::vars() to enumerate all environment variables
+    #[test]
+    fn test_detect_env_vars_enumeration() {
+        let source = r#"
+use std::env;
+
+fn enumerate_env() {
+    for (key, value) in env::vars() {
+        println!("{}: {}", key, value);
+    }
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let env_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::EnvAccess)
+            .collect();
+
+        assert!(!env_findings.is_empty(), "Should detect env::vars() call");
+    }
+
+    /// Test detection of env::set_var() which can poison environment
+    #[test]
+    fn test_detect_env_set_var() {
+        let source = r#"
+use std::env;
+
+fn poison() {
+    env::set_var("PATH", "/malicious/bin");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let env_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::EnvAccess)
+            .filter(|f| f.summary.contains("set_var") || f.summary.contains("PATH"))
+            .collect();
+
+        assert!(!env_findings.is_empty(), "Should detect env::set_var() call");
+    }
+
+    /// Test that sensitive keyword patterns are detected (e.g., MY_API_KEY)
+    #[test]
+    fn test_detect_sensitive_keyword_patterns() {
+        let source = r#"
+use std::env;
+
+fn main() {
+    let key = env::var("MY_API_KEY").unwrap();
+    let secret = env::var("SUPER_SECRET_VALUE").unwrap();
+    let pass = env::var("DB_PASSWORD").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let env_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::EnvAccess)
+            .filter(|f| f.severity == sus_core::Severity::High)
+            .collect();
+
+        // Should detect all three as sensitive because they contain KEY, SECRET, PASSWORD
+        assert!(
+            env_findings.len() >= 3,
+            "Should detect all sensitive keyword patterns as High severity, found {}",
+            env_findings.len()
+        );
     }
 }
