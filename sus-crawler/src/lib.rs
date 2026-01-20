@@ -4,5 +4,7 @@
 //! for crawling crates.io and analyzing crate sources.
 
 pub mod crates_io;
+pub mod downloader;
 
 pub use crates_io::{CrateMetadata, CrateResponse, CratesIoClient, CratesIoError};
+pub use downloader::{CrateDownloader, DownloadError, ExtractedCrate};

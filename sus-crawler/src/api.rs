@@ -13,7 +13,7 @@ use std::sync::Arc;
 use sus_core::Database;
 
 use crate::templates::StatusTemplate;
-use sus_crawler::CratesIoClient;
+use sus_crawler::{CrateDownloader, CratesIoClient};
 
 /// Wrapper for rendering Askama templates as HTML responses
 pub struct HtmlTemplate<T>(pub T);
@@ -41,14 +41,24 @@ pub struct AppState {
     pub db: Database,
     /// Crates.io API client
     pub crates_io_client: CratesIoClient,
+    /// Crate downloader for source extraction
+    pub crate_downloader: CrateDownloader,
 }
 
 /// Create the API router
 pub fn create_router(db: Database) -> Router {
     let crates_io_client = CratesIoClient::new().expect("Failed to create crates.io client");
+
+    // Create cache directory for downloaded crates
+    let cache_dir = std::env::var("CRATE_CACHE_DIR")
+        .unwrap_or_else(|_| "./data/crate_cache".to_string());
+    let crate_downloader = CrateDownloader::new(&cache_dir)
+        .expect("Failed to create crate downloader");
+
     let state = Arc::new(AppState {
         db,
         crates_io_client,
+        crate_downloader,
     });
 
     Router::new()
@@ -62,7 +72,9 @@ pub fn create_router(db: Database) -> Router {
         .route("/api/crawler/pause", axum::routing::post(pause))
         .route("/api/crawler/resume", axum::routing::post(resume))
         // Test endpoint to fetch crate metadata from crates.io
-        .route("/api/crawler/test-crate/:name", get(test_crate))
+        .route("/api/crawler/test-crate/{name}", get(test_crate))
+        // Test endpoint to download and extract a crate
+        .route("/api/crawler/test-download/{name}/{version}", get(test_download))
         .with_state(state)
 }
 
@@ -168,6 +180,50 @@ async fn test_crate(
                     "max_version": metadata.max_version,
                     "version_count": metadata.versions.len(),
                     "versions": metadata.versions.iter().take(10).collect::<Vec<_>>()
+                }
+            }))
+            .into_response()
+        }
+        Err(e) => {
+            let error_message = e.to_string();
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": error_message
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Test endpoint to download and extract a crate source
+/// GET /api/crawler/test-download/{name}/{version}
+///
+/// This endpoint demonstrates that the crate downloader works correctly.
+/// It downloads the specified crate version from crates.io, extracts it,
+/// and returns information about the extracted contents:
+/// - path: path to the extracted directory
+/// - crate_name: crate name
+/// - version: version number
+/// - has_build_rs: whether build.rs exists
+/// - is_proc_macro: whether this is a proc-macro crate
+async fn test_download(
+    Path((name, version)): Path<(String, String)>,
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> impl IntoResponse {
+    match state.crate_downloader.download_and_extract(&name, &version).await {
+        Ok(extracted) => {
+            Json(json!({
+                "success": true,
+                "extracted": {
+                    "crate_name": extracted.crate_name,
+                    "version": extracted.version,
+                    "path": extracted.path.to_string_lossy(),
+                    "has_build_rs": extracted.has_build_rs,
+                    "build_rs_path": extracted.build_rs_path.map(|p| p.to_string_lossy().to_string()),
+                    "is_proc_macro": extracted.is_proc_macro
                 }
             }))
             .into_response()

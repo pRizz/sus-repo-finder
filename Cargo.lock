@@ -2082,6 +2082,7 @@ dependencies = [
  "sus-core",
  "sus-detector",
  "tar",
+ "tempfile",
  "thiserror",
  "tokio",
  "tower",
