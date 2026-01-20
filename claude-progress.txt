@@ -2887,3 +2887,68 @@ Database migrations can be rolled back - the schema has both "up" (create) and "
 - Features passing: 42/170 (24.7%)
 - Feature #150 (Database migrations are reversible) - PASSING ✅
 
+## Session: 2026-01-19 (Agent - Feature #149)
+
+### Feature #149: Clean crate separation
+**Status: PASSING** ✅
+
+#### Feature Description:
+Each crate has single responsibility - verify proper separation of concerns across the Cargo workspace.
+
+#### Verification Steps:
+
+**Step 1: Review sus-core exports** ✅
+- sus-core/src/lib.rs provides comprehensive documentation
+- Exports: Database, Severity, IssueType, AnalysisStatus, CrawlerStatus, Crate, CrateWithStats, Version, AnalysisResult, etc.
+- Single responsibility: Shared data layer (types, models, database access)
+
+**Step 2: Verify sus-detector is detection-only** ✅
+- sus-detector/src/lib.rs exports only: Detector, patterns module
+- Uses sus_core for types (IssueType, Severity) only
+- Single responsibility: Pattern detection logic
+- No database access, no HTTP handling
+
+**Step 3: Verify sus-crawler uses shared code** ✅
+- Uses sus_core::Database for database access
+- Uses sus_detector::Detector for pattern detection
+- Has own: CratesIoClient, CrateDownloader, Crawler, API handlers
+- Single responsibility: Crawling crates.io and storing results
+
+**Step 4: Verify sus-dashboard uses shared code** ✅
+- Uses sus_core for Database, CrateWithStats, FindingStatus, FindingWithStatus, etc.
+- Has own: API handlers, HTML templates
+- Single responsibility: Viewing and presenting data
+- No crawling logic, no pattern detection
+
+#### Code Evidence:
+- sus-detector uses sus_core::{IssueType, Severity}
+- sus-crawler uses sus_core::Database
+- sus-dashboard uses sus_core::{Database, CrateWithStats, FindingStatus, ...}
+
+#### Test Evidence:
+- All 4 verification steps PASS
+- Screenshots: .playwright-mcp/feature-149-*.png
+
+#### Commit:
+- 1b6265e: Verify Feature #149: Clean crate separation
+
+#### Current Completion Status:
+- Features passing: 42/170 (24.7%)
+- Feature #149 (Clean crate separation) - PASSING ✅
+
+[Testing] 2026-01-19 19:30 - Regression test for Feature #11 (Pattern detector identifies network calls)
+  - Step 1: Created test build.rs with reqwest, std::net, hyper, curl, ureq calls ✅
+  - Step 2: Ran detector via /api/crawler/test-detector API ✅
+  - Step 3: Verified network patterns detected (16 findings):
+    - reqwest::blocking::get ✅
+    - std::net::TcpStream ✅
+    - hyper::Client::new ✅
+    - curl::easy::Easy ✅
+    - ureq::get ✅
+  - Step 4: Verified severity assignments:
+    - Network calls: medium severity ✅
+    - Build download URLs: high severity ✅
+  - Step 5: Verified line numbers captured (lines 2,3,7,10,13,16,19) ✅
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #11 still passing
+
