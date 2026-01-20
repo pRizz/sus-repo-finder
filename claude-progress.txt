@@ -2343,3 +2343,53 @@ Changed all `text-gray-500` and `text-gray-600` classes to `text-gray-400`:
   - Feature still PASSING ✅
 [Testing] Session complete - verified Feature #20 (Pattern detector identifies obfuscation) still passing
 
+
+## Session: 2026-01-19 (Agent - Feature #123)
+
+### Feature #123: API endpoints return real data
+**Status: PASSING** ✅
+
+#### Feature Description:
+Verifies that API endpoints return real data from the database, not hardcoded mock responses.
+
+#### Verification Steps:
+
+1. **Step 1: Query /api/stats** ✅
+   - Initial query returned: `{"by_severity":{"high":0,"low":1,"medium":1},"total_crates":6,"total_findings":2}`
+   - Data reflects actual database state
+
+2. **Step 2: Verify data matches database** ✅
+   - API code reviewed (sus-dashboard/src/api.rs) - uses `state.db.get_dashboard_stats()` 
+   - All endpoints call real database methods, no hardcoded values
+   - /api/crates returns real crate data with download counts from crates.io
+
+3. **Step 3: Add data to database** ✅
+   - Added "serde" crate via POST /api/crawler/crawl-and-store/serde
+   - Added HIGH severity finding via POST /api/crawler/store-finding
+   - Finding: "Network call detected in build.rs - TEST DATA FOR FEATURE 123"
+
+4. **Step 4: Query /api/stats again** ✅
+   - Response updated to: `{"by_severity":{"high":1,"low":1,"medium":1},"total_crates":7,"total_findings":3}`
+
+5. **Step 5: Verify response updated** ✅
+   - total_crates: 6 → 7 (new serde crate added)
+   - total_findings: 2 → 3 (new finding added)
+   - high: 0 → 1 (new high severity finding)
+   - Dashboard UI also shows updated data including "Recent Findings" with the test data
+
+#### Evidence:
+- Screenshots:
+  - feature-123-api-stats-initial.png (before adding data)
+  - feature-123-api-stats-updated.png (after adding data)
+  - feature-123-api-crates-serde.png (new crate with finding_count=1, max_severity=high)
+  - feature-123-dashboard-with-real-data.png (dashboard showing 7 crates, 3 findings, 1 high)
+- No console errors
+- API endpoints verified:
+  - GET /api/stats - returns real database stats
+  - GET /api/crates - returns real crate list with pagination
+  - GET /api/crates/:name - returns real crate details
+  - GET /api/findings/recent - returns real recent findings
+
+#### Current Completion Status:
+- Features passing: 36/170 (21.2%)
+- Feature #123 (API endpoints return real data) - PASSING ✅
