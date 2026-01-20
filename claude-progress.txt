@@ -5651,3 +5651,69 @@ The application uses Server-Sent Events (SSE) for real-time log streaming rather
 - Features passing: 82/170 (48.2%)
 - Feature #131 (HTMX requests succeed without errors) - PASSING ✅
 
+
+
+## Session: 2026-01-20 (Agent - Feature #136)
+
+### Feature #136: Code comments explain complex logic
+**Status: PASSING** ✅
+
+#### Feature Description:
+Pattern detection has explanations - verify that code comments in sus-detector explain complex logic, focusing on the "why" not just the "what".
+
+#### Verification Steps:
+
+**Step 1: Review sus-detector code** ✅
+- Reviewed all files in sus-detector crate:
+  - lib.rs (11 lines) - Module-level documentation
+  - patterns.rs (101 lines) - Finding structure and helper functions
+  - detector.rs (~3100 lines) - Main pattern detection logic
+
+**Step 2: Verify pattern detection commented** ✅
+All 11 pattern detection methods have comprehensive doc comments:
+- `detect_network_calls` - Lines 349-354
+- `detect_file_access` - Lines 361-366
+- `detect_shell_commands` - Lines 373-378
+- `detect_process_spawn` - Lines 385-391
+- `detect_env_access` - Lines 398-403
+- `detect_dynamic_lib` - Lines 410-416
+- `detect_unsafe_blocks` - Lines 423-428
+- `detect_sensitive_paths` - Lines 435-440
+- `detect_obfuscation` - Lines 447-453
+- `detect_build_download` - Lines 460-466
+- `detect_compiler_flags` - Lines 473-481
+
+**Step 3: Verify comments explain why, not what** ✅
+Comments focus on security implications and reasoning:
+
+Examples of "why" comments found:
+- "These indicate potential network I/O in build scripts which could be suspicious"
+- "File I/O operations which could be suspicious if accessing files outside expected paths"
+- "These indicate potential arbitrary command execution in build scripts"
+- "Could be exfiltrating sensitive data or making build behavior unpredictable"
+- "Accessing these elevates severity to High" (for sensitive env vars)
+- "Potential code injection or plugin loading which could execute arbitrary code at build time"
+- "Could indicate credential theft or privacy violation"
+- "Could be hiding malicious code through encoding/decoding"
+- "Could fetch and execute malicious code" (for build-time downloads)
+
+#### Documentation Statistics:
+- 73 doc comments (/// or //!) across the crate
+- 760+ lines containing explanatory phrases like "suspicious", "could be", "indicate", "detect"
+- All pattern constant arrays have explanatory header comments
+- Each visitor struct has a documentation comment explaining its purpose
+
+#### Why This Passes:
+The sus-detector crate has excellent documentation that:
+1. Explains the PURPOSE of each detection (why the pattern is concerning)
+2. Lists specific things each detector looks for (what it finds)
+3. Explains severity classifications (why certain patterns are more dangerous)
+4. Uses section headers to organize code logically
+
+#### Commit:
+- 45f889c: Verify Feature #136: Code comments explain complex logic
+
+#### Current Completion Status:
+- Features passing: 83/170 (48.8%)
+- Feature #136 (Code comments explain complex logic) - PASSING ✅
+
