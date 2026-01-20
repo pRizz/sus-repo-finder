@@ -1645,3 +1645,13 @@ Detects proc-macros that write files to the file system, which could be used to 
 #### Current Completion Status:
 - Features passing: 27/170 (15.9%)
 - Feature #22 (Pattern detector identifies macro code generation) - PASSING ✅
+[Testing] 2026-01-19 18:54:06 - Regression test for Feature #7 (System fonts loaded correctly)
+  - Dashboard loaded successfully at http://localhost:3002
+  - Body font: -apple-system, system-ui, Segoe UI, Noto Sans, Helvetica, Arial, sans-serif ✅
+  - Code snippets font: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace ✅
+  - Verified on crate detail page (anyhow) with code elements
+  - Screenshot: .playwright-mcp/regression-test-feature-7-fonts.png
+  - Console errors: favicon 404 only (cosmetic)
+  - All 3 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #7 (System fonts loaded correctly) still passing
