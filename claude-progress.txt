@@ -1716,3 +1716,114 @@ Detects libloading, dlopen usage that could indicate runtime code loading for ma
 #### Current Completion Status:
 - Features passing: 29/170 (17.1%)
 - Feature #16 (Pattern detector identifies dynamic library loading) - PASSING ✅
+[Testing] 2026-01-19 18:56:39 - Regression test for Feature #22 (Pattern detector identifies macro code generation)
+  - Test 1: proc-macro with File::create + write_all → 5 findings (file_access, medium)
+  - Test 2: proc-macro with fs::write to OUT_DIR → 6 findings (file_access + env_access)
+  - Test 3: proc-macro with OpenOptions to /etc/passwd → 8 findings (including high severity)
+  - All file write operations detected correctly:
+    - std::fs, std::io imports
+    - File::create, fs::write, OpenOptions::new
+    - write_all, write, create, open method calls
+  - Sensitive path detection working (/etc/passwd → high severity)
+  - Screenshot: .playwright-mcp/regression-test-feature-22-dashboard.png
+  - Console errors: favicon 404 only (cosmetic)
+  - All 3 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #22 (Pattern detector identifies macro code generation) still passing
+[Testing] 2026-01-19 18:58:13 - Regression test for Feature #27 (Crates.io API client fetches crate metadata)
+  - Tested via GET /api/crawler/test-crate/{name} endpoint
+  - Verified with multiple crates: serde, tokio
+  - Test results for 'serde':
+    1. ✅ Step 1: Call API for known crate 'serde' - HTTP 200 returned
+    2. ✅ Step 2: name='serde', versions=[312 total, 10 shown], description='A generic serialization/deserialization framework'
+    3. ✅ Step 3: downloads=780327940 (download count retrieved)
+    4. ✅ Step 4: repository='https://github.com/serde-rs/serde' (repo URL extracted)
+  - Additional verification with 'tokio':
+    - name='tokio', downloads=496131664, repository='https://github.com/tokio-rs/tokio'
+  - Screenshot: .playwright-mcp/.playwright-mcp/regression-test-feature-27-crates-io-api.png
+  - Console errors: favicon 404 only (cosmetic)
+  - All 4 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #27 (Crates.io API client fetches crate metadata) still passing
+
+## Session: 2026-01-19 (Agent - Feature #14)
+
+### Feature #14: Pattern detector identifies process spawning
+**Status: PASSING** ✅
+
+#### Feature Description:
+Detects process creation that could execute arbitrary code - includes fork/exec patterns,
+async process spawning, and subprocess library usage.
+
+#### Implementation Summary:
+1. Added PROCESS_SPAWN_PATTERNS constant with 35+ patterns:
+   - Unix fork/exec: nix::unistd::fork, execve, execvp, execv, daemon, setsid
+   - libc bindings: fork, vfork, execve, execl, posix_spawn, system, popen
+   - Async spawning: tokio::process, async_std::process, smol::process
+   - Libraries: subprocess, duct, run_script
+   - Types: Child, ExitStatus, ChildStdin/Stdout/Stderr
+
+2. Added PROCESS_SPAWN_METHODS constant:
+   - fork, vfork, execve, execvp, execv, execl
+   - posix_spawn, daemon, setsid
+   - wait, waitpid, kill, signal, popen, pclose
+   - detach, join, communicate, poll, terminate
+   - spawn_blocking
+
+3. Implemented ProcessSpawnVisitor with:
+   - visit_item_use: Detects process spawn imports
+   - visit_expr_call: Detects process spawn function calls
+   - visit_expr_method_call: Detects spawn-related method calls
+   - visit_expr_path: Detects process spawn type references
+
+4. Added 15 comprehensive unit tests:
+   - test_detect_nix_fork_import
+   - test_detect_libc_fork_call
+   - test_process_spawn_has_medium_severity
+   - test_detect_tokio_process_import
+   - test_detect_execve_call
+   - test_detect_subprocess_import
+   - test_detect_posix_spawn
+   - test_detect_process_spawn_methods
+   - test_detect_async_std_process
+   - test_detect_daemon_setsid
+   - test_process_spawn_context_extraction
+   - test_detect_libc_system
+   - test_detect_libc_popen
+   - test_detect_duct_crate
+   - test_detect_child_type_reference
+
+#### Verification Results (via POST /api/crawler/test-detector):
+
+Test 1 - Fork/execve:
+- ✅ nix::unistd::fork import - Detected (process_spawn, medium)
+- ✅ libc::execve import - Detected (process_spawn, medium)
+
+Test 2 - tokio::process:
+- ✅ tokio::process::Command - Detected (process_spawn, medium)
+- ✅ .wait() method - Detected (process_spawn, medium)
+
+Test 3 - libc patterns:
+- ✅ libc::posix_spawn, fork, system, popen - Detected (process_spawn, medium)
+- ✅ subprocess::Popen - Detected (process_spawn, medium)
+
+Test 4 - daemon/setsid:
+- ✅ nix::unistd::daemon, setsid, execvp - Detected (process_spawn, medium)
+- ✅ async_std::process::Command - Detected (process_spawn, medium)
+
+#### Files Modified:
+- sus-detector/src/detector.rs (+934 lines)
+  - Added PROCESS_SPAWN_PATTERNS and PROCESS_SPAWN_METHODS constants
+  - Implemented detect_process_spawn() method
+  - Added ProcessSpawnVisitor struct with Visit implementation
+  - Added 15 unit tests
+
+#### Screenshot:
+- .playwright-mcp/.playwright-mcp/feature-14-process-spawn-detection.png
+
+#### Commit:
+- 6883e94: Implement Feature #14: Pattern detector identifies process spawning
+
+#### Current Completion Status:
+- Features passing: 29/170 (17.1%)
+- Feature #14 (Pattern detector identifies process spawning) - PASSING ✅
