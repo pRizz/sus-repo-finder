@@ -1,0 +1,260 @@
+{% extends "base.html" %}
+
+{% block title %}Detailed View - Crawler Portal{% endblock %}
+
+{% block nav_detailed %}bg-dark-bg{% endblock %}
+
+{% block status_color %}{% if status == "running" %}bg-success{% else if status == "paused" %}bg-severity-medium{% else %}bg-gray-500{% endif %}{% endblock %}
+{% block status_text %}{{ status_display }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Page Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold text-white">Detailed View</h1>
+            <p class="text-gray-400 mt-1">Real-time crawler logs and activity</p>
+        </div>
+        <div class="flex space-x-3">
+            {% if status == "running" %}
+            <form action="/api/crawler/pause" method="post" class="inline">
+                <button type="submit" class="bg-severity-medium hover:bg-yellow-600 text-black font-medium px-4 py-2 rounded-lg transition-colors">
+                    Pause Crawler
+                </button>
+            </form>
+            {% else %}
+            <form action="/api/crawler/resume" method="post" class="inline">
+                <button type="submit" class="bg-success hover:bg-green-600 text-black font-medium px-4 py-2 rounded-lg transition-colors">
+                    Start Crawler
+                </button>
+            </form>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Stats Cards (Compact) -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-dark-surface border border-dark-border rounded-lg p-4">
+            <p class="text-gray-400 text-xs uppercase">Crates Scanned</p>
+            <p id="crates-scanned" class="text-2xl font-bold text-white">{{ crates_scanned }}</p>
+        </div>
+        <div class="bg-dark-surface border border-dark-border rounded-lg p-4">
+            <p class="text-gray-400 text-xs uppercase">Findings</p>
+            <p id="findings-count" class="text-2xl font-bold text-severity-high">{{ findings_count }}</p>
+        </div>
+        <div class="bg-dark-surface border border-dark-border rounded-lg p-4">
+            <p class="text-gray-400 text-xs uppercase">Errors</p>
+            <p id="errors-count" class="text-2xl font-bold text-severity-medium">{{ errors_count }}</p>
+        </div>
+        <div class="bg-dark-surface border border-dark-border rounded-lg p-4">
+            <p class="text-gray-400 text-xs uppercase">Queue</p>
+            <p id="queue-size" class="text-2xl font-bold text-gray-400">{{ queue_size }}</p>
+        </div>
+    </div>
+
+    <!-- Current Crate Progress -->
+    {% if has_current_crate %}
+    <div class="bg-dark-surface border border-dark-border rounded-lg p-4">
+        <div class="flex items-center justify-between mb-2">
+            <span class="text-gray-400 text-sm">Currently processing:</span>
+            <span id="current-crate" class="text-white font-mono text-sm">{{ current_crate_name }}</span>
+        </div>
+        <div class="w-full bg-dark-bg rounded-full h-1.5">
+            <div id="progress-bar" class="bg-accent h-1.5 rounded-full transition-all duration-300" style="width: {{ progress_percent }}%"></div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Live Log Viewer -->
+    <div class="bg-dark-surface border border-dark-border rounded-lg overflow-hidden">
+        <div class="flex items-center justify-between p-4 border-b border-dark-border">
+            <div class="flex items-center space-x-3">
+                <h2 class="text-lg font-semibold text-white">Live Logs</h2>
+                <span id="connection-status" class="flex items-center text-sm">
+                    <span id="connection-dot" class="h-2 w-2 rounded-full bg-gray-500 mr-2"></span>
+                    <span id="connection-text" class="text-gray-400">Connecting...</span>
+                </span>
+            </div>
+            <div class="flex items-center space-x-2">
+                <label class="flex items-center text-sm text-gray-400 cursor-pointer">
+                    <input type="checkbox" id="auto-scroll" checked class="mr-2 rounded border-dark-border bg-dark-bg text-accent focus:ring-accent">
+                    Auto-scroll
+                </label>
+                <button id="clear-logs" class="text-gray-400 hover:text-white text-sm px-3 py-1 border border-dark-border rounded hover:border-gray-500 transition-colors">
+                    Clear
+                </button>
+            </div>
+        </div>
+        <div id="log-container" class="h-96 overflow-y-auto p-4 font-mono text-sm bg-dark-bg">
+            <div id="log-messages">
+                <!-- Log messages will be inserted here -->
+            </div>
+            <div id="log-placeholder" class="text-gray-500 text-center py-8">
+                Waiting for log messages...
+            </div>
+        </div>
+    </div>
+
+    <!-- Log Level Legend -->
+    <div class="flex items-center space-x-6 text-sm">
+        <span class="flex items-center">
+            <span class="h-2 w-2 rounded-full bg-gray-400 mr-2"></span>
+            <span class="text-gray-400">Debug</span>
+        </span>
+        <span class="flex items-center">
+            <span class="h-2 w-2 rounded-full bg-accent mr-2"></span>
+            <span class="text-gray-400">Info</span>
+        </span>
+        <span class="flex items-center">
+            <span class="h-2 w-2 rounded-full bg-severity-medium mr-2"></span>
+            <span class="text-gray-400">Warning</span>
+        </span>
+        <span class="flex items-center">
+            <span class="h-2 w-2 rounded-full bg-severity-high mr-2"></span>
+            <span class="text-gray-400">Error</span>
+        </span>
+    </div>
+</div>
+
+<script>
+(function() {
+    const logContainer = document.getElementById('log-container');
+    const logMessages = document.getElementById('log-messages');
+    const logPlaceholder = document.getElementById('log-placeholder');
+    const autoScrollCheckbox = document.getElementById('auto-scroll');
+    const clearLogsButton = document.getElementById('clear-logs');
+    const connectionDot = document.getElementById('connection-dot');
+    const connectionText = document.getElementById('connection-text');
+
+    let eventSource = null;
+    let messageCount = 0;
+    const maxMessages = 1000; // Keep last 1000 messages to prevent memory issues
+
+    // Color mapping for log levels
+    const levelColors = {
+        'debug': 'text-gray-400',
+        'info': 'text-accent',
+        'warn': 'text-severity-medium',
+        'warning': 'text-severity-medium',
+        'error': 'text-severity-high',
+    };
+
+    const levelDots = {
+        'debug': 'bg-gray-400',
+        'info': 'bg-accent',
+        'warn': 'bg-severity-medium',
+        'warning': 'bg-severity-medium',
+        'error': 'bg-severity-high',
+    };
+
+    function formatTimestamp(isoString) {
+        try {
+            const date = new Date(isoString);
+            return date.toLocaleTimeString('en-US', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                fractionalSecondDigits: 3
+            });
+        } catch (e) {
+            return isoString;
+        }
+    }
+
+    function addLogMessage(data) {
+        // Hide placeholder on first message
+        if (messageCount === 0) {
+            logPlaceholder.style.display = 'none';
+        }
+
+        const level = (data.level || 'info').toLowerCase();
+        const colorClass = levelColors[level] || 'text-gray-300';
+        const dotClass = levelDots[level] || 'bg-gray-400';
+        const timestamp = formatTimestamp(data.timestamp);
+        const message = data.message || '';
+        const target = data.target ? `[${data.target}]` : '';
+
+        const logLine = document.createElement('div');
+        logLine.className = 'flex items-start py-0.5 hover:bg-dark-surface/30';
+        logLine.innerHTML = `
+            <span class="h-2 w-2 rounded-full ${dotClass} mt-1.5 mr-2 flex-shrink-0"></span>
+            <span class="text-gray-500 mr-2 flex-shrink-0">${timestamp}</span>
+            ${target ? `<span class="text-gray-500 mr-2">${target}</span>` : ''}
+            <span class="${colorClass}">${escapeHtml(message)}</span>
+        `;
+
+        logMessages.appendChild(logLine);
+        messageCount++;
+
+        // Remove old messages if we exceed the limit
+        while (logMessages.children.length > maxMessages) {
+            logMessages.removeChild(logMessages.firstChild);
+        }
+
+        // Auto-scroll if enabled
+        if (autoScrollCheckbox.checked) {
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function updateConnectionStatus(status, text) {
+        connectionDot.className = `h-2 w-2 rounded-full mr-2 ${status}`;
+        connectionText.textContent = text;
+    }
+
+    function connectSSE() {
+        if (eventSource) {
+            eventSource.close();
+        }
+
+        updateConnectionStatus('bg-severity-medium', 'Connecting...');
+
+        eventSource = new EventSource('/api/crawler/logs');
+
+        eventSource.onopen = function() {
+            updateConnectionStatus('bg-success', 'Connected');
+        };
+
+        eventSource.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                addLogMessage(data);
+            } catch (e) {
+                // Handle plain text messages
+                addLogMessage({ message: event.data, level: 'info', timestamp: new Date().toISOString() });
+            }
+        };
+
+        eventSource.onerror = function() {
+            updateConnectionStatus('bg-severity-high', 'Disconnected');
+            // Attempt to reconnect after 3 seconds
+            setTimeout(connectSSE, 3000);
+        };
+    }
+
+    // Clear logs button
+    clearLogsButton.addEventListener('click', function() {
+        logMessages.innerHTML = '';
+        messageCount = 0;
+        logPlaceholder.style.display = 'block';
+    });
+
+    // Start SSE connection
+    connectSSE();
+
+    // Clean up on page unload
+    window.addEventListener('beforeunload', function() {
+        if (eventSource) {
+            eventSource.close();
+        }
+    });
+})();
+</script>
+{% endblock %}

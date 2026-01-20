@@ -92,10 +92,14 @@ pub fn create_router(db: Database) -> Router {
     let crate_downloader =
         CrateDownloader::new(&cache_dir).expect("Failed to create crate downloader");
 
+    // Create broadcast channel for log messages (100 message buffer)
+    let (log_sender, _) = broadcast::channel::<LogMessage>(100);
+
     let state = Arc::new(AppState {
         db: Arc::new(db),
         crates_io_client: Arc::new(crates_io_client),
         crate_downloader: Arc::new(crate_downloader),
+        log_sender,
     });
 
     Router::new()
@@ -146,6 +150,8 @@ pub fn create_router(db: Database) -> Router {
             "/api/crawler/test-rate-limit",
             axum::routing::post(test_rate_limit),
         )
+        // SSE endpoint for live log streaming
+        .route("/api/crawler/logs", get(logs_sse))
         .with_state(state)
 }
 
@@ -164,8 +170,19 @@ async fn index() -> impl IntoResponse {
     HtmlTemplate(template)
 }
 
-async fn detailed() -> &'static str {
-    "Crawler Portal - Detailed View (TODO: implement template)"
+/// Detailed view page with live logs
+async fn detailed() -> impl IntoResponse {
+    // TODO: Fetch real stats from database when crawler is implemented
+    let template = DetailedTemplate::new(
+        "idle", 0,    // crates_scanned
+        0,    // findings_count
+        0,    // errors_count
+        0,    // queue_size
+        None, // current_crate
+        0.0,  // progress_percent
+    );
+
+    HtmlTemplate(template)
 }
 
 async fn errors() -> &'static str {
@@ -215,11 +232,66 @@ async fn pause() -> impl IntoResponse {
     }))
 }
 
-async fn resume() -> impl IntoResponse {
+async fn resume(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> impl IntoResponse {
+    // Send a log message to demonstrate the SSE is working
+    state.send_log("info", "Crawler resume requested", Some("crawler"));
+
     Json(json!({
         "success": true,
         "status": "running"
     }))
+}
+
+/// SSE endpoint for streaming live log messages
+/// GET /api/crawler/logs
+///
+/// This endpoint returns a Server-Sent Events stream of log messages.
+/// Clients connect and receive real-time log updates from the crawler.
+async fn logs_sse(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    // Subscribe to the log broadcast channel
+    let receiver = state.log_sender.subscribe();
+
+    // Send an initial connection message
+    state.send_log("info", "SSE client connected to log stream", Some("sse"));
+
+    // Convert the broadcast receiver into a stream
+    let stream = BroadcastStream::new(receiver)
+        .filter_map(|result| {
+            match result {
+                Ok(msg) => {
+                    // Serialize the log message to JSON
+                    match serde_json::to_string(&msg) {
+                        Ok(json) => Some(Ok(Event::default().data(json))),
+                        Err(_) => None,
+                    }
+                }
+                Err(_) => None, // Skip lagged messages
+            }
+        });
+
+    // Create a heartbeat stream that sends a ping every 15 seconds to keep connection alive
+    let heartbeat = stream::repeat_with(|| {
+        let msg = LogMessage {
+            level: "debug".to_string(),
+            message: "heartbeat".to_string(),
+            target: Some("sse".to_string()),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        };
+        match serde_json::to_string(&msg) {
+            Ok(json) => Ok(Event::default().data(json)),
+            Err(_) => Ok(Event::default().data("{}")),
+        }
+    })
+    .throttle(Duration::from_secs(15));
+
+    // Merge the log stream with heartbeat
+    let merged = tokio_stream::StreamExt::merge(stream, heartbeat);
+
+    Sse::new(merged).keep_alive(KeepAlive::default())
 }
 
 /// Test endpoint to fetch crate metadata from crates.io API
