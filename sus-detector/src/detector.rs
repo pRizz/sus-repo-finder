@@ -470,6 +470,18 @@ impl Detector {
         visitor.findings
     }
 
+    /// Detect macro code generation that writes to the file system.
+    ///
+    /// Looks for:
+    /// - File writing operations in proc-macro context
+    /// - std::fs::write, File::create, etc. in macro code
+    /// - OUT_DIR or CARGO_MANIFEST_DIR access for code generation
+    fn detect_macro_codegen(&self, ast: &syn::File, source: &str, path: &str) -> Vec<Finding> {
+        let mut visitor = MacroCodegenVisitor::new(source, path);
+        visitor.visit_file(ast);
+        visitor.findings
+    }
+
     /// Detect compiler/linker flag manipulation through cargo build outputs.
     ///
     /// Looks for:
@@ -2519,7 +2531,7 @@ impl<'a> ObfuscationVisitor<'a> {
         // Base64 strings are typically multiples of 4 and contain only valid characters
         let base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
         let valid_chars = s.chars().all(|c| base64_chars.contains(c));
-        let reasonable_length = s.len() >= 24 && s.len().is_multiple_of(4);
+        let reasonable_length = s.len() >= 24 && s.len() % 4 == 0;
         valid_chars && reasonable_length
     }
 
@@ -2531,7 +2543,7 @@ impl<'a> ObfuscationVisitor<'a> {
         // Hex strings are even length and contain only hex characters
         let hex_chars = "0123456789abcdefABCDEF";
         let valid_chars = s.chars().all(|c| hex_chars.contains(c));
-        let even_length = s.len().is_multiple_of(2);
+        let even_length = s.len() % 2 == 0;
         valid_chars && even_length && s.len() >= 32
     }
 
@@ -2698,26 +2710,27 @@ impl<'a> Visit<'a> for ObfuscationVisitor<'a> {
 
     /// Check literal expressions for encoded data
     fn visit_expr_lit(&mut self, node: &'a ExprLit) {
-        // Check string literals for base64/hex patterns
+        // Check string literals for hex/base64 patterns
+        // Note: Check hex FIRST because hex strings are also valid base64 (subset of chars)
         if let Some(s) = Self::extract_string_literal(&node.lit) {
-            if Self::looks_like_base64(&s) {
-                let line = self.get_line_number(node.lit.span());
-                self.create_finding(
-                    line,
-                    "base64_string",
-                    &format!(
-                        "String literal looks like base64 encoded data: \"{}...\" (length: {})",
-                        &s[..s.len().min(40)],
-                        s.len()
-                    ),
-                );
-            } else if Self::looks_like_hex(&s) {
+            if Self::looks_like_hex(&s) {
                 let line = self.get_line_number(node.lit.span());
                 self.create_finding(
                     line,
                     "hex_string",
                     &format!(
                         "String literal looks like hex encoded data: \"{}...\" (length: {})",
+                        &s[..s.len().min(40)],
+                        s.len()
+                    ),
+                );
+            } else if Self::looks_like_base64(&s) {
+                let line = self.get_line_number(node.lit.span());
+                self.create_finding(
+                    line,
+                    "base64_string",
+                    &format!(
+                        "String literal looks like base64 encoded data: \"{}...\" (length: {})",
                         &s[..s.len().min(40)],
                         s.len()
                     ),
@@ -2946,6 +2959,219 @@ impl<'a> Visit<'a> for BuildDownloadVisitor<'a> {
                 line,
                 pattern,
                 &format!("Build download type reference detected: {}", path_str),
+            );
+        }
+        syn::visit::visit_expr_path(self, node);
+    }
+}
+
+// ============================================================================
+// Macro Codegen Detection
+// ============================================================================
+
+/// Patterns that indicate proc-macro code generation that writes to the file system.
+/// This is suspicious because proc-macros should only generate TokenStreams, not write files.
+const MACRO_CODEGEN_PATTERNS: &[&str] = &[
+    // File writing functions
+    "std::fs::write",
+    "fs::write",
+    "std::fs::File",
+    "fs::File",
+    "File::create",
+    "OpenOptions",
+    // Output directory access (common in code generation)
+    "OUT_DIR",
+    "CARGO_MANIFEST_DIR",
+    // Write traits
+    "Write::write",
+    "Write::write_all",
+    "BufWriter",
+];
+
+/// Method names that indicate file writing in proc-macro context
+const MACRO_CODEGEN_METHODS: &[&str] = &[
+    "write",
+    "write_all",
+    "write_fmt",
+    "create",
+    "flush",
+];
+
+/// Visitor that detects proc-macro code that writes to the file system
+struct MacroCodegenVisitor<'a> {
+    source: &'a str,
+    file_path: &'a str,
+    findings: Vec<Finding>,
+    is_proc_macro: bool,
+}
+
+impl<'a> MacroCodegenVisitor<'a> {
+    fn new(source: &'a str, file_path: &'a str) -> Self {
+        // Check if this looks like a proc-macro file
+        let is_proc_macro = source.contains("#[proc_macro")
+            || source.contains("proc_macro::")
+            || source.contains("use proc_macro")
+            || source.contains("TokenStream");
+
+        Self {
+            source,
+            file_path,
+            findings: Vec::new(),
+            is_proc_macro,
+        }
+    }
+
+    /// Check if a path matches macro codegen patterns
+    fn matches_macro_codegen_pattern(path_str: &str) -> bool {
+        for pattern in MACRO_CODEGEN_PATTERNS {
+            if path_str.contains(pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if a method is a file writing method
+    fn is_file_write_method(method: &str) -> bool {
+        MACRO_CODEGEN_METHODS.contains(&method)
+    }
+
+    /// Get the line number from a span
+    fn get_line_number(&self, span: proc_macro2::Span) -> usize {
+        span.start().line
+    }
+
+    /// Create a finding for macro codegen detection
+    fn create_finding(&mut self, line: usize, pattern_found: &str, summary: &str) {
+        let (context_before, snippet, context_after) = extract_snippet(self.source, line, line, 3);
+
+        let finding = Finding::new(
+            IssueType::MacroCodegen,
+            default_severity(IssueType::MacroCodegen), // Medium severity
+            self.file_path.to_string(),
+            line,
+            line,
+            snippet,
+            summary.to_string(),
+        )
+        .with_context(context_before, context_after)
+        .with_details(serde_json::json!({
+            "pattern": pattern_found,
+            "is_proc_macro_context": self.is_proc_macro,
+            "detection_type": "macro_codegen"
+        }));
+
+        self.findings.push(finding);
+    }
+}
+
+impl<'a> Visit<'a> for MacroCodegenVisitor<'a> {
+    /// Check `use` statements for file writing imports in proc-macro context
+    fn visit_item_use(&mut self, node: &'a ItemUse) {
+        let use_str = format_use_tree(&node.tree);
+        if Self::matches_macro_codegen_pattern(&use_str) {
+            let line = self.get_line_number(node.use_token.span);
+            let pattern = MACRO_CODEGEN_PATTERNS
+                .iter()
+                .find(|p| use_str.contains(*p))
+                .unwrap_or(&"file_write");
+            let context = if self.is_proc_macro {
+                "proc-macro"
+            } else {
+                "build script"
+            };
+            self.create_finding(
+                line,
+                pattern,
+                &format!(
+                    "File writing import in {} context: {}",
+                    context, use_str
+                ),
+            );
+        }
+        syn::visit::visit_item_use(self, node);
+    }
+
+    /// Check function calls for file writing patterns
+    fn visit_expr_call(&mut self, node: &'a ExprCall) {
+        if let Expr::Path(ExprPath { path, .. }) = &*node.func {
+            let path_str = format_path(path);
+            if Self::matches_macro_codegen_pattern(&path_str) {
+                let line = self.get_line_number(
+                    path.segments
+                        .first()
+                        .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
+                );
+                let pattern = MACRO_CODEGEN_PATTERNS
+                    .iter()
+                    .find(|p| path_str.contains(*p))
+                    .unwrap_or(&"file_write");
+                let context = if self.is_proc_macro {
+                    "proc-macro"
+                } else {
+                    "build script"
+                };
+                self.create_finding(
+                    line,
+                    pattern,
+                    &format!(
+                        "File writing call in {} context: {}",
+                        context, path_str
+                    ),
+                );
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    /// Check method calls for file writing methods
+    fn visit_expr_method_call(&mut self, node: &'a ExprMethodCall) {
+        let method_name = node.method.to_string();
+        if Self::is_file_write_method(&method_name) {
+            let line = self.get_line_number(node.method.span());
+            let context = if self.is_proc_macro {
+                "proc-macro"
+            } else {
+                "build script"
+            };
+            self.create_finding(
+                line,
+                &method_name,
+                &format!(
+                    "File writing method in {} context: .{}()",
+                    context, method_name
+                ),
+            );
+        }
+        syn::visit::visit_expr_method_call(self, node);
+    }
+
+    /// Check path expressions for file system access
+    fn visit_expr_path(&mut self, node: &'a ExprPath) {
+        let path_str = format_path(&node.path);
+        if Self::matches_macro_codegen_pattern(&path_str) {
+            let line = self.get_line_number(
+                node.path
+                    .segments
+                    .first()
+                    .map_or_else(proc_macro2::Span::call_site, |s| s.ident.span()),
+            );
+            let pattern = MACRO_CODEGEN_PATTERNS
+                .iter()
+                .find(|p| path_str.contains(*p))
+                .unwrap_or(&"file_write");
+            let context = if self.is_proc_macro {
+                "proc-macro"
+            } else {
+                "build script"
+            };
+            self.create_finding(
+                line,
+                pattern,
+                &format!(
+                    "File system reference in {} context: {}",
+                    context, path_str
+                ),
             );
         }
         syn::visit::visit_expr_path(self, node);
