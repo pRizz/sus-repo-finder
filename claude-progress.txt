@@ -2009,3 +2009,126 @@ modify the build process in unexpected ways.
 #### Current Completion Status:
 - Features passing: 32/170 (18.8%)
 - Feature #21 (Pattern detector identifies compiler flag manipulation) - PASSING ✅
+[Testing] 2026-01-19 19:10 - Regression test for Feature #13 (Pattern detector identifies shell commands)
+  - Step 1: Created test files with Command::new('bash') patterns ✅
+  - Step 2: Ran detector via POST /api/crawler/test-detector ✅
+  - Step 3: Verified shell_command pattern detected:
+    - std::process::Command import detected ✅
+    - Command::new("bash") detected ✅
+    - Command::new("sh"), Command::new("powershell"), Command::new("cmd") all detected ✅
+    - Suspicious -c argument detected ✅
+  - Step 4: Verified appropriate severity: all findings have 'medium' severity ✅
+  - Dashboard shows 'Shell command execution detected in build.rs' with medium severity ✅
+  - Screenshots:
+    - .playwright-mcp/regression-test-feature-13-shell-command-portal.png
+    - .playwright-mcp/regression-test-feature-13-shell-command-dashboard.png
+  - Console errors: favicon 404 only (cosmetic)
+  - All 4 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #13 (Pattern detector identifies shell commands) still passing
+
+
+## Session: 2026-01-19 (Agent - Feature #96)
+
+### Feature #96: Success color is green
+**Status: PASSING** ✅
+
+#### Feature Description:
+Success states use green color (#3fb950) as specified in the design system.
+
+#### Implementation:
+1. Added `success: "#3fb950"` to dashboard Tailwind config (sus-dashboard/templates/base.html)
+2. Added `accent: "#58a6ff"` to dashboard Tailwind config for consistency with crawler portal
+3. Updated crate detail page to use `text-success` class for the checkmark icon
+
+#### Verification Results:
+
+**Crawler Portal (localhost:3001):**
+- "Start Crawler" button background color: `#3fb950` ✅
+- Status indicator when running: `bg-success` ✅
+- Already had success color defined in Tailwind config
+
+**Dashboard (localhost:3002):**
+- "No suspicious patterns detected" checkmark icon color: `#3fb950` ✅
+- Added success color to Tailwind config
+- Changed `text-green-500` to `text-success` class
+
+#### Files Modified:
+- sus-dashboard/templates/base.html: Added success and accent colors to Tailwind config
+- sus-dashboard/templates/crate_detail.html: Changed checkmark icon to use text-success
+
+#### Test Evidence:
+- Browser automation verified exact hex value #3fb950 matches rgb(63, 185, 80)
+- Screenshots saved:
+  - .playwright-mcp/.playwright-mcp/feature-96-crawler-portal-success-color.png
+  - .playwright-mcp/.playwright-mcp/feature-96-dashboard-success-color.png  
+  - .playwright-mcp/.playwright-mcp/feature-96-success-green-verified.png
+- No console errors
+
+#### Commit:
+- cc4666e: Implement Feature #96: Success color is green (#3fb950)
+
+#### Current Completion Status:
+- Features passing: 31/170 (18.2%)
+- Feature #96 (Success color is green) - PASSING ✅
+
+
+## Session: 2026-01-19 (Agent - Feature #100)
+
+### Feature #100: 404 page shown for invalid routes
+**Status: PASSING**
+
+#### Feature Description:
+Unknown URLs show 404 page with link to homepage.
+
+#### Implementation:
+1. Created 404 Template (sus-dashboard/templates/not_found.html):
+   - Extends base.html for consistent dark theme styling
+   - Shows large "404" text and "Page Not Found" heading
+   - Helpful message explaining the page does not exist
+   - "Go to Homepage" button linking to /
+   - Additional links to "Browse Crates" and "Dashboard"
+   - Clean, centered design with sad face icon
+
+2. Added NotFoundTemplate (sus-dashboard/src/templates.rs):
+   - Simple struct with derive(Template)
+   - References not_found.html template
+
+3. Added Fallback Handler (sus-dashboard/src/api.rs):
+   - Added not_found_handler() async function
+   - Returns (StatusCode::NOT_FOUND, HtmlTemplate(NotFoundTemplate))
+   - Added .fallback(not_found_handler) to router
+
+#### Verification Steps:
+1. Step 1: Navigate to /invalid/route/path - PASS
+   - Navigated to http://localhost:3002/invalid/route/path
+   - Page loaded successfully
+
+2. Step 2: Verify 404 page displayed - PASS
+   - Page shows "404" large text
+   - "Page Not Found" heading visible
+   - Helpful message displayed
+   - HTTP status code is 404
+
+3. Step 3: Verify link to homepage - PASS
+   - "Go to Homepage" button present
+   - Clicking it navigates to / (dashboard)
+   - Additional links to /crates also work
+
+#### Test Evidence:
+- Screenshots: feature-100-404-page.png, feature-100-404-verified.png
+- Console errors: Only expected 404 error for navigation
+- HTTP status verified via curl: 404
+
+#### Files Modified:
+- sus-dashboard/templates/not_found.html (new)
+- sus-dashboard/src/templates.rs (added NotFoundTemplate)
+- sus-dashboard/src/api.rs (added fallback handler)
+
+#### Commit:
+- 7725027: Implement Feature #100: 404 page shown for invalid routes
+
+#### Current Completion Status:
+- Features passing: 32/170 (18.8%)
+- Feature #100 (404 page shown for invalid routes) - PASSING
+
