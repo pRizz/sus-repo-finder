@@ -105,6 +105,11 @@ pub fn create_router(db: Database) -> Router {
             "/api/crawler/test-detector",
             axum::routing::post(test_detector),
         )
+        // Test rate limiting by processing multiple crates
+        .route(
+            "/api/crawler/test-rate-limit",
+            axum::routing::post(test_rate_limit),
+        )
         .with_state(state)
 }
 

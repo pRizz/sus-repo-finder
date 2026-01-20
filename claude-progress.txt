@@ -3118,3 +3118,91 @@ Project compiles cleanly - verify that `cargo build` succeeds without errors.
 #### Current Completion Status:
 - Features passing: 47/170 (27.6%)
 - Feature #154 (Cargo build succeeds) - PASSING ✅
+[Testing] 2026-01-19 19:36 - Regression test for Feature #17 (Pattern detector identifies unsafe blocks)
+  - Step 1: Created test build.rs with large unsafe blocks and raw pointers ✅
+  - Step 2: Ran detector via /api/crawler/test-detector API ✅
+  - Step 3: Verified unsafe_block patterns detected (4 findings):
+    - Line 2-10: large block (7 statements), raw pointer manipulation ✅
+    - Line 13-15: Unsafe block detected (small, not suspicious) ✅
+    - Line 17: raw pointer manipulation (transmute) ✅
+    - Line 18-24: large block (5 statements), raw pointer manipulation ✅
+  - Step 4: Verified raw pointer manipulation flagged:
+    - 3 findings with pattern=raw_pointer and is_suspicious=true ✅
+    - Severity: medium for suspicious blocks, low for simple blocks ✅
+  - Screenshot: .playwright-mcp/feature-17-regression-dashboard.png
+  - Console errors: None (favicon 404 only - cosmetic)
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #17 still passing
+
+## Session: 2026-01-20 (Agent - Feature #72)
+
+### Feature #72: Crate list pagination works
+**Status: PASSING** ✅
+
+#### Feature Description:
+Multiple pages of results navigable - implement pagination for the crate list page.
+
+#### Implementation Summary:
+
+1. **Added pagination database method** (sus-core/src/db.rs)
+   - `get_crates_paginated(page, per_page)` - Returns crates with LIMIT/OFFSET
+   - Uses 1-indexed pages for user-friendliness
+
+2. **Updated CrateListTemplate** (sus-dashboard/src/templates.rs)
+   - Added PageNumber helper struct for page number rendering
+   - Added pagination fields: page, per_page, total_pages, showing_start, showing_end
+   - Added has_prev, has_next, prev_page, next_page for navigation controls
+
+3. **Updated crate_list handler** (sus-dashboard/src/api.rs)
+   - Added CrateListPageQuery for page/per_page query parameters
+   - Pre-computes pagination values for template
+   - Generates page_numbers vector for UI
+
+4. **Updated crate_list.html template**
+   - Pagination navigation bar below crate table
+   - "Showing X to Y of Z results" display
+   - Previous/Next buttons (disabled when not applicable)
+   - Clickable page numbers with current page highlighted
+   - Responsive design (page numbers hidden on mobile)
+
+5. **Created seed data**
+   - Added 43 popular crates via crawler API (total: 51 crates)
+   - Crates include: syn, quote, proc-macro2, log, regex, bytes, futures, etc.
+
+#### Verification Steps:
+
+1. **Step 1: Create 50 crates** ✅
+   - Created 51 crates (was 8, added 43 more)
+
+2. **Step 2: Load crate list with page size 10** ✅
+   - Default page size is 10
+   - Page loads at http://localhost:3002/crates
+
+3. **Step 3: Verify first 10 shown** ✅
+   - Page 1 shows: native-tls, openssl, sha2, md5, tonic, prost, rustls, rocket, axum, warp
+   - "Showing 1 to 10 of 51 results"
+
+4. **Step 4: Click page 2** ✅
+   - Clicked page 2 link
+   - URL changed to /crates?page=2&per_page=10
+
+5. **Step 5: Verify next 10 shown** ✅
+   - Page 2 shows: sqlx, diesel, actix-web, crossbeam, dashmap, rayon, flume, num-derive, strum, strum_macros
+   - "Showing 11 to 20 of 51 results"
+   - Page 2 button highlighted, Previous button now active
+
+#### Test Evidence:
+- Screenshots:
+  - .playwright-mcp/.playwright-mcp/feature-72-pagination-page1.png
+  - .playwright-mcp/.playwright-mcp/feature-72-pagination-controls.png
+  - .playwright-mcp/.playwright-mcp/feature-72-pagination-page2.png
+- Console errors: favicon 404 only (cosmetic)
+- All 5 verification steps PASS
+
+#### Commit:
+- fab4fcf: Implement Feature #72: Crate list pagination works
+
+#### Current Completion Status:
+- Features passing: 47/170 (27.6%)
+- Feature #72 (Crate list pagination works) - PASSING ✅
+
