@@ -1,0 +1,4 @@
+{
+  "source": "use libloading::Library;\n\nfn main() {\n    let lib = Library::new(\"plugin.so\").unwrap();\n    let func: libloading::Symbol<fn()> = lib.get(b\"my_func\").unwrap();\n    func();\n}",
+  "file_path": "build.rs"
+}
