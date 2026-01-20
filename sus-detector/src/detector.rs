@@ -752,4 +752,92 @@ fn main() {
             "File access should have Medium severity"
         );
     }
+
+    /// Test detection of std::io imports
+    #[test]
+    fn test_detect_std_io_import() {
+        let source = r#"
+use std::io::Read;
+use std::io::Write;
+
+fn main() {}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let file_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::FileAccess)
+            .collect();
+
+        assert!(!file_findings.is_empty(), "Should detect std::io import");
+    }
+
+    /// Test detection of file operation methods
+    #[test]
+    fn test_detect_file_method_calls() {
+        let source = r#"
+fn main() {
+    let data = some_file.read_to_string();
+    another_file.write_all(b"data");
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let file_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::FileAccess)
+            .collect();
+
+        // Should detect read_to_string and write_all method calls
+        assert!(
+            file_findings.len() >= 2,
+            "Should detect file method calls, found {}",
+            file_findings.len()
+        );
+    }
+
+    /// Test detection of directory operations
+    #[test]
+    fn test_detect_directory_operations() {
+        let source = r#"
+use std::fs;
+
+fn setup() {
+    fs::create_dir_all("output/nested").unwrap();
+    fs::remove_dir_all("temp").unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let file_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::FileAccess)
+            .collect();
+
+        assert!(!file_findings.is_empty(), "Should detect directory operations");
+    }
+
+    /// Test detection of tokio async file operations
+    #[test]
+    fn test_detect_tokio_fs() {
+        let source = r#"
+use tokio::fs;
+
+async fn async_file_op() {
+    fs::read_to_string("file.txt").await.unwrap();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let file_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::FileAccess)
+            .collect();
+
+        assert!(!file_findings.is_empty(), "Should detect tokio::fs import");
+    }
 }
