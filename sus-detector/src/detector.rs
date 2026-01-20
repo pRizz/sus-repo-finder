@@ -89,6 +89,109 @@ const FILE_ACCESS_METHODS: &[&str] = &[
     "canonicalize",
 ];
 
+/// Shell command and process execution patterns to detect.
+/// These indicate potential arbitrary command execution in build scripts.
+const SHELL_COMMAND_PATTERNS: &[&str] = &[
+    // Standard library process module
+    "std::process",
+    "Command",
+    // Common shell names that might be invoked
+    "bash",
+    "sh",
+    "cmd",
+    "powershell",
+    "pwsh",
+    "zsh",
+    "fish",
+    // Direct executable paths
+    "/bin/sh",
+    "/bin/bash",
+    "/usr/bin/env",
+];
+
+/// Shell invocation arguments that are particularly suspicious
+/// (indicate shell interpretation of commands)
+const SUSPICIOUS_SHELL_ARGS: &[&str] = &[
+    "-c",    // Execute command string
+    "/C",    // Windows cmd.exe execute
+    "-e",    // Execute expression
+    "eval",  // Shell eval
+    "exec",  // Shell exec
+];
+
+/// Environment variable access patterns to detect.
+/// These indicate build scripts reading environment variables which could
+/// be exfiltrating sensitive data or making build behavior unpredictable.
+const ENV_ACCESS_PATTERNS: &[&str] = &[
+    // Standard library env module
+    "std::env",
+    "env::var",
+    "env::var_os",
+    "env::vars",
+    "env::vars_os",
+    "env::set_var",
+    "env::remove_var",
+];
+
+/// Sensitive environment variable names that are particularly concerning
+/// when accessed from build scripts. Accessing these elevates severity to High.
+const SENSITIVE_ENV_VARS: &[&str] = &[
+    // Authentication and credentials
+    "AWS_ACCESS_KEY",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "GITLAB_TOKEN",
+    "NPM_TOKEN",
+    "DOCKER_PASSWORD",
+    "DOCKER_AUTH",
+    "API_KEY",
+    "SECRET_KEY",
+    "PRIVATE_KEY",
+    "PASSWORD",
+    "PASSWD",
+    "CREDENTIALS",
+    "AUTH_TOKEN",
+    "ACCESS_TOKEN",
+    "BEARER_TOKEN",
+    // SSH and GPG
+    "SSH_AUTH_SOCK",
+    "SSH_AGENT_PID",
+    "GPG_TTY",
+    "GPG_AGENT_INFO",
+    // Cloud providers
+    "AZURE_CLIENT_SECRET",
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "GCP_SERVICE_ACCOUNT",
+    // Database credentials
+    "DATABASE_URL",
+    "DATABASE_PASSWORD",
+    "DB_PASSWORD",
+    "POSTGRES_PASSWORD",
+    "MYSQL_PASSWORD",
+    "REDIS_PASSWORD",
+    "MONGODB_URI",
+    // CI/CD secrets
+    "CI_JOB_TOKEN",
+    "CIRCLE_TOKEN",
+    "TRAVIS_TOKEN",
+    "JENKINS_TOKEN",
+    // Home directory access
+    "HOME",
+    "USERPROFILE",
+];
+
+/// Environment access methods that indicate reading/writing env vars
+const ENV_ACCESS_METHODS: &[&str] = &[
+    "var",
+    "var_os",
+    "vars",
+    "vars_os",
+    "set_var",
+    "remove_var",
+];
+
 /// The main pattern detector
 pub struct Detector {
     // Configuration options can be added here
@@ -151,9 +254,16 @@ impl Detector {
         visitor.findings
     }
 
-    fn detect_shell_commands(&self, _ast: &syn::File, _source: &str, _path: &str) -> Vec<Finding> {
-        // TODO: Implement shell command detection
-        Vec::new()
+    /// Detect shell command execution that could run arbitrary code.
+    ///
+    /// Looks for:
+    /// - `use` statements importing std::process or Command
+    /// - Command::new() calls, especially with shell names (bash, sh, cmd)
+    /// - Method calls like .arg(), .args(), .spawn(), .output()
+    fn detect_shell_commands(&self, ast: &syn::File, source: &str, path: &str) -> Vec<Finding> {
+        let mut visitor = ShellCommandVisitor::new(source, path);
+        visitor.visit_file(ast);
+        visitor.findings
     }
 
     fn detect_process_spawn(&self, _ast: &syn::File, _source: &str, _path: &str) -> Vec<Finding> {
@@ -161,9 +271,16 @@ impl Detector {
         Vec::new()
     }
 
-    fn detect_env_access(&self, _ast: &syn::File, _source: &str, _path: &str) -> Vec<Finding> {
-        // TODO: Implement env access detection
-        Vec::new()
+    /// Detect environment variable access that could leak sensitive data.
+    ///
+    /// Looks for:
+    /// - `use` statements importing std::env
+    /// - env::var(), env::var_os() function calls
+    /// - Access to sensitive environment variables (AWS keys, tokens, etc.)
+    fn detect_env_access(&self, ast: &syn::File, source: &str, path: &str) -> Vec<Finding> {
+        let mut visitor = EnvAccessVisitor::new(source, path);
+        visitor.visit_file(ast);
+        visitor.findings
     }
 
     fn detect_dynamic_lib(&self, _ast: &syn::File, _source: &str, _path: &str) -> Vec<Finding> {
@@ -535,6 +652,462 @@ impl<'a> Visit<'a> for FileAccessVisitor<'a> {
 }
 
 // ============================================================================
+// Shell Command Detection
+// ============================================================================
+
+/// Visitor that walks the AST looking for shell command execution patterns
+struct ShellCommandVisitor<'a> {
+    source: &'a str,
+    file_path: &'a str,
+    findings: Vec<Finding>,
+}
+
+impl<'a> ShellCommandVisitor<'a> {
+    fn new(source: &'a str, file_path: &'a str) -> Self {
+        Self {
+            source,
+            file_path,
+            findings: Vec::new(),
+        }
+    }
+
+    /// Check if a path segment matches any shell command pattern
+    fn matches_shell_pattern(path_str: &str) -> bool {
+        for pattern in SHELL_COMMAND_PATTERNS {
+            if path_str.contains(pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if a string literal is a shell name
+    fn is_shell_name(s: &str) -> bool {
+        let shell_names = ["bash", "sh", "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "zsh", "fish"];
+        shell_names.contains(&s) || s.starts_with("/bin/") || s.starts_with("/usr/bin/") || s.contains("\\cmd") || s.contains("\\powershell")
+    }
+
+    /// Get the line number from a span
+    fn get_line_number(&self, span: proc_macro2::Span) -> usize {
+        span.start().line
+    }
+
+    /// Create a finding for a detected shell command pattern
+    fn create_finding(&mut self, line: usize, pattern_found: &str, summary: &str) {
+        let (context_before, snippet, context_after) =
+            extract_snippet(self.source, line, line, 3);
+
+        let finding = Finding::new(
+            IssueType::ShellCommand,
+            default_severity(IssueType::ShellCommand),
+            self.file_path.to_string(),
+            line,
+            line,
+            snippet,
+            summary.to_string(),
+        )
+        .with_context(context_before, context_after)
+        .with_details(serde_json::json!({
+            "pattern": pattern_found,
+            "detection_type": "shell_command"
+        }));
+
+        self.findings.push(finding);
+    }
+
+    /// Extract string literal value from a syn::Lit
+    fn extract_string_literal(lit: &syn::Lit) -> Option<String> {
+        if let syn::Lit::Str(lit_str) = lit {
+            Some(lit_str.value())
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> Visit<'a> for ShellCommandVisitor<'a> {
+    /// Check `use` statements for process/command imports
+    fn visit_item_use(&mut self, node: &'a ItemUse) {
+        let use_str = format_use_tree(&node.tree);
+        if Self::matches_shell_pattern(&use_str) {
+            let line = self.get_line_number(node.use_token.span);
+            let pattern = SHELL_COMMAND_PATTERNS
+                .iter()
+                .find(|p| use_str.contains(*p))
+                .unwrap_or(&"shell_command");
+            self.create_finding(
+                line,
+                pattern,
+                &format!("Process/command import detected: {}", use_str),
+            );
+        }
+        syn::visit::visit_item_use(self, node);
+    }
+
+    /// Check function calls for Command::new() and similar
+    fn visit_expr_call(&mut self, node: &'a ExprCall) {
+        if let Expr::Path(ExprPath { path, .. }) = &*node.func {
+            let path_str = format_path(path);
+
+            // Detect Command::new() specifically
+            if path_str == "Command::new" || path_str.ends_with("::Command::new") {
+                let line = self.get_line_number(path.segments.first().map_or_else(
+                    || proc_macro2::Span::call_site(),
+                    |s| s.ident.span(),
+                ));
+
+                // Check if the argument is a shell name
+                let shell_name = node.args.first().and_then(|arg| {
+                    if let Expr::Lit(expr_lit) = arg {
+                        Self::extract_string_literal(&expr_lit.lit)
+                    } else {
+                        None
+                    }
+                });
+
+                let summary = if let Some(ref name) = shell_name {
+                    if Self::is_shell_name(name) {
+                        format!("Shell command execution detected: Command::new(\"{}\")", name)
+                    } else {
+                        format!("Command execution detected: Command::new(\"{}\")", name)
+                    }
+                } else {
+                    "Command execution detected: Command::new()".to_string()
+                };
+
+                self.create_finding(line, "Command::new", &summary);
+            } else if Self::matches_shell_pattern(&path_str) {
+                let line = self.get_line_number(path.segments.first().map_or_else(
+                    || proc_macro2::Span::call_site(),
+                    |s| s.ident.span(),
+                ));
+                let pattern = SHELL_COMMAND_PATTERNS
+                    .iter()
+                    .find(|p| path_str.contains(*p))
+                    .unwrap_or(&"shell_command");
+                self.create_finding(
+                    line,
+                    pattern,
+                    &format!("Shell command function call detected: {}", path_str),
+                );
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    /// Check method calls for command-related methods
+    fn visit_expr_method_call(&mut self, node: &'a ExprMethodCall) {
+        let method_name = node.method.to_string();
+
+        // Check for Command method chain calls: .arg(), .args(), .spawn(), .output(), .status()
+        let command_methods = ["arg", "args", "spawn", "output", "status", "current_dir", "env", "envs"];
+
+        if command_methods.contains(&method_name.as_str()) {
+            // For .arg() calls, check if the argument is suspicious
+            if method_name == "arg" || method_name == "args" {
+                if let Some(first_arg) = node.args.first() {
+                    if let Expr::Lit(expr_lit) = first_arg {
+                        if let Some(arg_value) = Self::extract_string_literal(&expr_lit.lit) {
+                            // Check for suspicious shell arguments like "-c"
+                            if SUSPICIOUS_SHELL_ARGS.contains(&arg_value.as_str()) {
+                                let line = self.get_line_number(node.method.span());
+                                self.create_finding(
+                                    line,
+                                    &arg_value,
+                                    &format!("Suspicious shell argument detected: .{}(\"{}\")", method_name, arg_value),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check if receiver might be a Command
+            if let Expr::Path(ExprPath { path, .. }) = &*node.receiver {
+                let path_str = format_path(path);
+                if path_str.contains("Command") || path_str.contains("cmd") {
+                    let line = self.get_line_number(node.method.span());
+                    self.create_finding(
+                        line,
+                        &method_name,
+                        &format!("Command method call detected: {}.{}()", path_str, method_name),
+                    );
+                }
+            }
+        }
+
+        syn::visit::visit_expr_method_call(self, node);
+    }
+
+    /// Check path expressions for Command type references
+    fn visit_expr_path(&mut self, node: &'a ExprPath) {
+        let path_str = format_path(&node.path);
+        if Self::matches_shell_pattern(&path_str) {
+            let line = self.get_line_number(
+                node.path
+                    .segments
+                    .first()
+                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+            );
+            let pattern = SHELL_COMMAND_PATTERNS
+                .iter()
+                .find(|p| path_str.contains(*p))
+                .unwrap_or(&"shell_command");
+            self.create_finding(
+                line,
+                pattern,
+                &format!("Shell command type reference detected: {}", path_str),
+            );
+        }
+        syn::visit::visit_expr_path(self, node);
+    }
+}
+
+// ============================================================================
+// Environment Variable Access Detection
+// ============================================================================
+
+/// Visitor that walks the AST looking for environment variable access patterns.
+/// This detects potential data exfiltration through environment variables or
+/// build scripts that access sensitive credentials.
+struct EnvAccessVisitor<'a> {
+    source: &'a str,
+    file_path: &'a str,
+    findings: Vec<Finding>,
+}
+
+impl<'a> EnvAccessVisitor<'a> {
+    fn new(source: &'a str, file_path: &'a str) -> Self {
+        Self {
+            source,
+            file_path,
+            findings: Vec::new(),
+        }
+    }
+
+    /// Check if a path segment matches any env access pattern
+    fn matches_env_pattern(path_str: &str) -> bool {
+        for pattern in ENV_ACCESS_PATTERNS {
+            if path_str.contains(pattern) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if an env var name is sensitive (credentials, secrets, etc.)
+    fn is_sensitive_env_var(name: &str) -> bool {
+        let name_upper = name.to_uppercase();
+        for sensitive in SENSITIVE_ENV_VARS {
+            if name_upper.contains(sensitive) {
+                return true;
+            }
+        }
+        // Also check for common patterns
+        name_upper.contains("SECRET")
+            || name_upper.contains("TOKEN")
+            || name_upper.contains("KEY")
+            || name_upper.contains("PASSWORD")
+            || name_upper.contains("CREDENTIAL")
+            || name_upper.contains("PRIVATE")
+    }
+
+    /// Get the line number from a span
+    fn get_line_number(&self, span: proc_macro2::Span) -> usize {
+        span.start().line
+    }
+
+    /// Create a finding for a detected env access pattern
+    fn create_finding(
+        &mut self,
+        line: usize,
+        pattern_found: &str,
+        summary: &str,
+        is_sensitive: bool,
+    ) {
+        let (context_before, snippet, context_after) =
+            extract_snippet(self.source, line, line, 3);
+
+        // Sensitive env var access is High severity, general env access is Low
+        let severity = if is_sensitive {
+            sus_core::Severity::High
+        } else {
+            default_severity(IssueType::EnvAccess)
+        };
+
+        let finding = Finding::new(
+            IssueType::EnvAccess,
+            severity,
+            self.file_path.to_string(),
+            line,
+            line,
+            snippet,
+            summary.to_string(),
+        )
+        .with_context(context_before, context_after)
+        .with_details(serde_json::json!({
+            "pattern": pattern_found,
+            "detection_type": "env_access",
+            "is_sensitive": is_sensitive
+        }));
+
+        self.findings.push(finding);
+    }
+
+    /// Extract string literal value from a syn::Lit
+    fn extract_string_literal(lit: &syn::Lit) -> Option<String> {
+        if let syn::Lit::Str(lit_str) = lit {
+            Some(lit_str.value())
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> Visit<'a> for EnvAccessVisitor<'a> {
+    /// Check `use` statements for env module imports
+    fn visit_item_use(&mut self, node: &'a ItemUse) {
+        let use_str = format_use_tree(&node.tree);
+        if Self::matches_env_pattern(&use_str) {
+            let line = self.get_line_number(node.use_token.span);
+            let pattern = ENV_ACCESS_PATTERNS
+                .iter()
+                .find(|p| use_str.contains(*p))
+                .unwrap_or(&"env_access");
+            self.create_finding(
+                line,
+                pattern,
+                &format!("Environment module import detected: {}", use_str),
+                false, // import itself isn't sensitive
+            );
+        }
+        syn::visit::visit_item_use(self, node);
+    }
+
+    /// Check function calls for env::var() and similar
+    fn visit_expr_call(&mut self, node: &'a ExprCall) {
+        if let Expr::Path(ExprPath { path, .. }) = &*node.func {
+            let path_str = format_path(path);
+
+            // Detect env::var(), env::var_os(), etc.
+            if Self::matches_env_pattern(&path_str) {
+                let line = self.get_line_number(path.segments.first().map_or_else(
+                    || proc_macro2::Span::call_site(),
+                    |s| s.ident.span(),
+                ));
+
+                // Check if accessing a sensitive env var
+                let env_var_name = node.args.first().and_then(|arg| {
+                    if let Expr::Lit(expr_lit) = arg {
+                        Self::extract_string_literal(&expr_lit.lit)
+                    } else {
+                        None
+                    }
+                });
+
+                let (summary, is_sensitive) = if let Some(ref name) = env_var_name {
+                    let sensitive = Self::is_sensitive_env_var(name);
+                    let summary = if sensitive {
+                        format!(
+                            "Sensitive environment variable access detected: {}(\"{}\")",
+                            path_str, name
+                        )
+                    } else {
+                        format!("Environment variable access detected: {}(\"{}\")", path_str, name)
+                    };
+                    (summary, sensitive)
+                } else {
+                    (
+                        format!("Environment variable access detected: {}", path_str),
+                        false,
+                    )
+                };
+
+                self.create_finding(line, &path_str, &summary, is_sensitive);
+            }
+        }
+        syn::visit::visit_expr_call(self, node);
+    }
+
+    /// Check method calls for env-related methods
+    fn visit_expr_method_call(&mut self, node: &'a ExprMethodCall) {
+        let method_name = node.method.to_string();
+
+        // Check for env access method names
+        if ENV_ACCESS_METHODS.contains(&method_name.as_str()) {
+            // Check if receiver is env-related
+            if let Expr::Path(ExprPath { path, .. }) = &*node.receiver {
+                let path_str = format_path(path);
+                if path_str.contains("env") || Self::matches_env_pattern(&path_str) {
+                    let line = self.get_line_number(node.method.span());
+
+                    // Check if accessing a sensitive env var
+                    let env_var_name = node.args.first().and_then(|arg| {
+                        if let Expr::Lit(expr_lit) = arg {
+                            Self::extract_string_literal(&expr_lit.lit)
+                        } else {
+                            None
+                        }
+                    });
+
+                    let (summary, is_sensitive) = if let Some(ref name) = env_var_name {
+                        let sensitive = Self::is_sensitive_env_var(name);
+                        let summary = if sensitive {
+                            format!(
+                                "Sensitive environment variable access detected: {}.{}(\"{}\")",
+                                path_str, method_name, name
+                            )
+                        } else {
+                            format!(
+                                "Environment variable method call detected: {}.{}(\"{}\")",
+                                path_str, method_name, name
+                            )
+                        };
+                        (summary, sensitive)
+                    } else {
+                        (
+                            format!(
+                                "Environment variable method call detected: {}.{}()",
+                                path_str, method_name
+                            ),
+                            false,
+                        )
+                    };
+
+                    self.create_finding(line, &method_name, &summary, is_sensitive);
+                }
+            }
+        }
+
+        syn::visit::visit_expr_method_call(self, node);
+    }
+
+    /// Check path expressions for env type references
+    fn visit_expr_path(&mut self, node: &'a ExprPath) {
+        let path_str = format_path(&node.path);
+        if Self::matches_env_pattern(&path_str) {
+            let line = self.get_line_number(
+                node.path
+                    .segments
+                    .first()
+                    .map_or_else(|| proc_macro2::Span::call_site(), |s| s.ident.span()),
+            );
+            let pattern = ENV_ACCESS_PATTERNS
+                .iter()
+                .find(|p| path_str.contains(*p))
+                .unwrap_or(&"env_access");
+            self.create_finding(
+                line,
+                pattern,
+                &format!("Environment module reference detected: {}", path_str),
+                false,
+            );
+        }
+        syn::visit::visit_expr_path(self, node);
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -839,5 +1412,252 @@ async fn async_file_op() {
             .collect();
 
         assert!(!file_findings.is_empty(), "Should detect tokio::fs import");
+    }
+
+    // ========================================================================
+    // Shell Command Detection Tests
+    // ========================================================================
+
+    /// Test detection of Command::new("bash") - the primary test case
+    #[test]
+    fn test_detect_command_new_bash() {
+        let source = r#"
+use std::process::Command;
+
+fn main() {
+    Command::new("bash").arg("-c").arg("echo hello").spawn();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let shell_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ShellCommand)
+            .collect();
+
+        assert!(!shell_findings.is_empty(), "Should detect Command::new(\"bash\")");
+        assert!(
+            shell_findings.iter().any(|f| f.summary.contains("bash")),
+            "Summary should mention bash"
+        );
+    }
+
+    /// Test that shell commands have Medium severity
+    #[test]
+    fn test_shell_commands_have_medium_severity() {
+        let source = r#"
+use std::process::Command;
+
+fn main() {
+    Command::new("sh").spawn();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let shell_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ShellCommand)
+            .collect();
+
+        assert!(!shell_findings.is_empty(), "Should detect shell command");
+        assert_eq!(
+            shell_findings[0].severity,
+            sus_core::Severity::Medium,
+            "Shell commands should have Medium severity"
+        );
+    }
+
+    /// Test detection of std::process::Command import
+    #[test]
+    fn test_detect_process_command_import() {
+        let source = r#"
+use std::process::Command;
+
+fn main() {}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let shell_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ShellCommand)
+            .collect();
+
+        assert!(!shell_findings.is_empty(), "Should detect std::process::Command import");
+    }
+
+    /// Test detection of different shell names
+    #[test]
+    fn test_detect_various_shells() {
+        // Test sh
+        let source_sh = r#"
+use std::process::Command;
+fn main() { Command::new("sh").spawn(); }
+"#;
+        let detector = Detector::new();
+        let findings_sh = detector.analyze(source_sh, "build.rs");
+        let shell_findings_sh: Vec<_> = findings_sh
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ShellCommand)
+            .collect();
+        assert!(!shell_findings_sh.is_empty(), "Should detect sh");
+
+        // Test cmd (Windows)
+        let source_cmd = r#"
+use std::process::Command;
+fn main() { Command::new("cmd").spawn(); }
+"#;
+        let findings_cmd = detector.analyze(source_cmd, "build.rs");
+        let shell_findings_cmd: Vec<_> = findings_cmd
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ShellCommand)
+            .collect();
+        assert!(!shell_findings_cmd.is_empty(), "Should detect cmd");
+
+        // Test powershell
+        let source_ps = r#"
+use std::process::Command;
+fn main() { Command::new("powershell").spawn(); }
+"#;
+        let findings_ps = detector.analyze(source_ps, "build.rs");
+        let shell_findings_ps: Vec<_> = findings_ps
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ShellCommand)
+            .collect();
+        assert!(!shell_findings_ps.is_empty(), "Should detect powershell");
+    }
+
+    /// Test detection of suspicious shell arguments like -c
+    #[test]
+    fn test_detect_suspicious_shell_args() {
+        let source = r#"
+use std::process::Command;
+
+fn main() {
+    Command::new("bash")
+        .arg("-c")
+        .arg("rm -rf /")
+        .spawn();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let shell_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ShellCommand)
+            .collect();
+
+        assert!(!shell_findings.is_empty(), "Should detect shell command with -c arg");
+        // Should have multiple findings: import, Command::new, and the -c argument
+        assert!(
+            shell_findings.iter().any(|f| f.summary.contains("-c")),
+            "Should flag the -c argument as suspicious"
+        );
+    }
+
+    /// Test detection of Command with absolute path
+    #[test]
+    fn test_detect_absolute_path_shell() {
+        let source = r#"
+use std::process::Command;
+
+fn main() {
+    Command::new("/bin/sh").spawn();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let shell_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ShellCommand)
+            .collect();
+
+        assert!(!shell_findings.is_empty(), "Should detect /bin/sh command");
+        assert!(
+            shell_findings.iter().any(|f| f.summary.contains("/bin/sh")),
+            "Summary should mention /bin/sh"
+        );
+    }
+
+    /// Test that non-shell commands are still detected but not flagged as shell
+    #[test]
+    fn test_detect_non_shell_command() {
+        let source = r#"
+use std::process::Command;
+
+fn main() {
+    Command::new("cargo").arg("build").spawn();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let shell_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ShellCommand)
+            .collect();
+
+        // Should still detect Command::new but summary should say "Command execution" not "Shell command execution"
+        assert!(!shell_findings.is_empty(), "Should detect Command::new");
+        let cargo_finding = shell_findings.iter().find(|f| f.summary.contains("cargo"));
+        assert!(cargo_finding.is_some(), "Should find cargo command");
+        assert!(
+            cargo_finding.unwrap().summary.contains("Command execution"),
+            "Non-shell commands should say 'Command execution' not 'Shell command execution'"
+        );
+    }
+
+    /// Test that context is extracted for shell commands
+    #[test]
+    fn test_shell_command_context_extraction() {
+        let source = r#"// Line 1
+// Line 2
+// Line 3
+use std::process::Command;
+// Line 5
+// Line 6
+// Line 7
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let shell_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ShellCommand)
+            .collect();
+
+        assert!(!shell_findings.is_empty(), "Should detect Command import");
+        let finding = &shell_findings[0];
+
+        // Context should include surrounding lines
+        assert!(
+            !finding.context_before.is_empty() || !finding.context_after.is_empty(),
+            "Should have some context"
+        );
+    }
+
+    /// Test detection using /usr/bin/env
+    #[test]
+    fn test_detect_usr_bin_env() {
+        let source = r#"
+use std::process::Command;
+
+fn main() {
+    Command::new("/usr/bin/env").arg("python").arg("script.py").spawn();
+}
+"#;
+        let detector = Detector::new();
+        let findings = detector.analyze(source, "build.rs");
+
+        let shell_findings: Vec<_> = findings
+            .iter()
+            .filter(|f| f.issue_type == IssueType::ShellCommand)
+            .collect();
+
+        assert!(!shell_findings.is_empty(), "Should detect /usr/bin/env command");
     }
 }
