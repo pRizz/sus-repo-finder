@@ -379,3 +379,53 @@
 - Features passing: 7/170 (4.1%)
 - Feature #54 (Dashboard landing page loads) - PASSING
 
+[Testing] 2026-01-19 18:12:05 - Regression test for Feature #61 (Crate list page loads)
+  - Navigated to http://localhost:3002/crates
+  - HTTP 200 confirmed - page loaded successfully
+  - Page title: 'Crates - Sus Repo Finder'
+  - UI elements verified:
+    - Navigation bar with 'Sus Repo Finder' branding
+    - Dashboard and Crates links present
+    - Search box present
+    - 'Scanned Crates' heading displayed
+    - '0 crates scanned' count shown
+    - Empty state message displayed correctly
+    - Footer present
+  - Screenshot saved: .playwright-mcp/regression-test-feature-61-crates.png
+  - Only console error: favicon.ico 404 (cosmetic, not functional)
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #61 (Crate list page loads) still passing
+
+## Session: 2026-01-19 (Agent - Feature #8)
+
+### Feature #8: README exists with project overview
+**Status: PASSING**
+
+#### What was done:
+- Verified README.md exists in project root (/Users/peterryszkiewicz/Repos/sus-repo-finder/README.md)
+- Verified README contains comprehensive project documentation
+
+#### Steps verified:
+1. ✅ Check README.md exists in root - File exists (6620 bytes)
+2. ✅ Verify project name is mentioned - "Sus Repo Finder" found on line 1 (title) and line 7
+3. ✅ Verify overview section exists - "## Overview" found on line 5
+4. ✅ Verify setup instructions exist - "## Quick Start" found on line 84 with full setup guide
+
+#### README Contents Summary:
+- Project title: "Sus Repo Finder 🔍🦀"
+- Overview section explaining crawler and dashboard components
+- Features section with pattern detection capabilities
+- Severity classification (High/Medium/Low)
+- Technology stack documentation
+- Project structure
+- Prerequisites
+- Quick Start with clone, setup, and run instructions
+- Configuration with environment variables table
+- API endpoints documentation (Dashboard and Crawler Portal)
+- Development section (tests, code quality, release build)
+- Architecture diagram (ASCII)
+- License, Contributing, and Security sections
+
+#### Current Completion Status:
+- Features passing: 9/170 (5.3%)
+- Feature #8 (README exists with project overview) - PASSING
