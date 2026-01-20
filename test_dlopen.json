@@ -1,0 +1,4 @@
+{
+  "source": "extern \"C\" {\n    fn dlopen(filename: *const i8, flags: i32) -> *mut std::ffi::c_void;\n    fn dlsym(handle: *mut std::ffi::c_void, symbol: *const i8) -> *mut std::ffi::c_void;\n}\n\nfn load_evil() {\n    unsafe {\n        let handle = dlopen(b\"malicious.so\\0\".as_ptr() as *const i8, 1);\n        let sym = dlsym(handle, b\"evil_func\\0\".as_ptr() as *const i8);\n    }\n}",
+  "file_path": "build.rs"
+}

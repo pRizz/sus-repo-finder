@@ -1655,3 +1655,64 @@ Detects proc-macros that write files to the file system, which could be used to 
   - All 3 verification steps PASS
   - Feature still PASSING ✅
 [Testing] Session complete - verified Feature #7 (System fonts loaded correctly) still passing
+[Testing] 2026-01-19 - Regression test for Feature #17 (Pattern detector identifies unsafe blocks)
+  - Tested via POST /api/crawler/test-detector with large unsafe block code
+  - Test code contained: raw pointer manipulation, std::alloc, std::ptr operations
+  - Results verified:
+    1. ✅ Step 1: Created test with large unsafe block (6 statements)
+    2. ✅ Step 2: Ran detector via API
+    3. ✅ Step 3: Verified unsafe_block pattern detected (issue_type: unsafe_block)
+    4. ✅ Step 4: Verified raw pointer manipulation flagged (pattern: raw_pointer, is_suspicious: true)
+  - Finding details:
+    - Summary: 'Unsafe block detected: large block (6 statements), raw pointer manipulation'
+    - Severity: medium
+    - Line range: 3-10
+    - Detection type: unsafe_block
+  - Screenshot: .playwright-mcp/regression-test-feature-17-unsafe-block.png
+  - Console errors: None
+  - All 4 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #17 (Pattern detector identifies unsafe blocks) still passing
+
+## Session: 2026-01-19 (Agent - Feature #16)
+
+### Feature #16: Pattern detector identifies dynamic library loading
+**Status: PASSING** ✅
+
+#### Feature Description:
+Detects libloading, dlopen usage that could indicate runtime code loading for malicious purposes.
+
+#### Verification Results (via POST /api/crawler/test-detector):
+
+1. ✅ **libloading crate import** - Detected: "Dynamic library crate import detected: libloading::Library"
+2. ✅ **dlopen function call** - Detected: "Dynamic library function call detected: dlopen"
+3. ✅ **dlsym function call** - Detected: "Dynamic library function call detected: dlsym"
+4. ✅ **RTLD_LAZY flag** - Detected: "Dynamic library type reference detected: RTLD_LAZY"
+5. ✅ **Library::new() call** - Detected: "Dynamic library function call detected: Library::new"
+6. ✅ **lib.get() method** - Detected: "Potential dynamic library method call: lib.get()"
+
+#### Steps Verified:
+- Step 1: Create test with libloading usage ✅
+  - Tested code with `use libloading::Library;` and `Library::new()`
+- Step 2: Run detector ✅
+  - Used POST /api/crawler/test-detector endpoint
+- Step 3: Verify dynamic_lib pattern detected ✅
+  - 10+ dynamic_lib findings returned with correct issue_type and severity
+
+#### Severity Verification:
+- All dynamic_lib findings have `severity: "medium"` as per spec
+
+#### Implementation Details:
+- DynamicLibVisitor walks AST looking for dynamic library patterns
+- DYNAMIC_LIB_PATTERNS constant contains: libloading, dlopen, dlsym, dlclose, LoadLibraryA, GetProcAddress, etc.
+- DYNAMIC_LIB_METHODS constant contains: new, get, into_raw, from_raw, dlopen, dlsym
+- Context extraction provides 3 lines before/after for review
+
+#### Test Evidence:
+- Screenshot: .playwright-mcp/feature-16-dynamic-lib-detection-verified.png
+- Console errors: favicon 404 only (cosmetic)
+- All API responses returned HTTP 200 with valid findings
+
+#### Current Completion Status:
+- Features passing: 29/170 (17.1%)
+- Feature #16 (Pattern detector identifies dynamic library loading) - PASSING ✅
