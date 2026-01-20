@@ -3748,3 +3748,99 @@ While testing Feature #137, discovered a build failure caused by invalid Askama 
 - Feature #137 still passes (rustdoc comments present on public API)
 
 #### Result: Regression Fixed, Feature #137 Still Passing
+[Testing] 2026-01-20 - Regression test for Feature #101 (API error returns JSON error response)
+  - Step 1: Trigger API error condition ✅
+    - Tested /api/crates/nonexistent-test-crate - 404 Not Found
+    - Tested /api/crates/serde/versions/0.0.0-invalid - 404 Not Found
+    - Tested /api/crates/anyhow/versions/nonexistent-version - 404 Not Found
+  - Step 2: Verify JSON response ✅
+    - All API endpoints return valid JSON, not HTML
+    - Response format: {"error":"...","message":"..."}
+  - Step 3: Verify error field present ✅
+    - error field present in all error responses
+    - Contains specific error description
+  - Step 4: Verify message is meaningful ✅
+    - message field provides user-friendly explanation
+    - Examples: 'The requested crate does not exist in the database'
+  - Screenshots:
+    - .playwright-mcp/.playwright-mcp/feature-101-api-error-json.png
+    - .playwright-mcp/.playwright-mcp/feature-101-api-error-version.png
+  - Console errors: Only expected 404 status codes (correct behavior)
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #101 still passing
+
+## Session: 2026-01-20 (Agent - Feature #47)
+
+### Feature #47: Crawler portal shows pending queue
+**Status: PASSING** ✅
+
+#### Feature Description:
+List of crates waiting to be processed visible on the crawler portal status page.
+
+#### Implementation Summary:
+
+1. **Database Functions Added** (sus-core/src/db.rs)
+   - `add_to_queue(crate_name, version, priority)` - Add crate to queue
+   - `get_pending_queue_items()` - Get all pending items ordered by priority
+   - `get_pending_queue_items_limited(limit)` - Get pending items with limit
+   - `get_pending_queue_count()` - Count pending items
+   - `mark_queue_item_in_progress(id)` - Mark as in-progress
+   - `mark_queue_item_completed(id)` - Mark as completed
+   - `mark_queue_item_failed(id)` - Mark as failed
+   - `clear_pending_queue()` - Clear all pending items
+
+2. **New Model Added** (sus-core/src/models.rs)
+   - `QueueItemRow` struct for database queries with String timestamps
+
+3. **API Endpoints Added** (sus-crawler/src/api.rs)
+   - POST /api/crawler/queue/add - Add single crate to queue
+   - POST /api/crawler/queue/add-bulk - Add multiple crates at once
+   - Updated GET /api/crawler/queue - Returns real queue data
+
+4. **Status Page Updated** (already committed by another agent)
+   - QueueItemDisplay struct for template rendering
+   - Pending Queue section in status.html
+   - Priority badges (High ≥100, Medium ≥50, Normal default)
+   - Queue ordered by priority (highest first)
+
+5. **Index Handler Updated** (sus-crawler/src/api.rs)
+   - Fetches real queue data from database
+   - Displays first 10 pending items on status page
+
+#### Verification Steps:
+
+1. **Step 1: Queue 10 crates** ✅
+   - Added via POST /api/crawler/queue/add (serde)
+   - Added via POST /api/crawler/queue/add-bulk (tokio, anyhow, clap, regex, log, rand, chrono, reqwest, hyper)
+   - reqwest given priority 100 (High), serde priority 50 (Medium), rest priority 0 (Normal)
+
+2. **Step 2: Load status page** ✅
+   - Navigated to http://localhost:3001/
+   - Page loads successfully
+
+3. **Step 3: Verify queue section visible** ✅
+   - "Pending Queue" heading visible
+   - Section appears below "Current Progress"
+
+4. **Step 4: Verify crate names listed** ✅
+   - All 10 crate names displayed: reqwest, serde, tokio, anyhow, clap, regex, log, rand, chrono, hyper
+   - Versions shown for each
+   - Priority badges displayed correctly
+
+5. **Step 5: Verify count matches queued amount** ✅
+   - Queue Size card shows "10"
+   - Header shows "10 crate(s) waiting"
+
+#### Test Evidence:
+- Screenshots:
+  - .playwright-mcp/.playwright-mcp/feature-47-queue-visible.png
+  - .playwright-mcp/.playwright-mcp/feature-47-queue-full-table.png
+- Console errors: None (favicon 404 only - cosmetic)
+- API response: /api/crawler/queue returns 10 pending items correctly ordered
+
+#### Commit:
+- a772801: Implement Feature #47: Crawler portal shows pending queue
+
+#### Current Completion Status:
+- Features passing: 53/170 (31.2%)
+- Feature #47 (Crawler portal shows pending queue) - PASSING ✅
