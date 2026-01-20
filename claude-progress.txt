@@ -3377,3 +3377,83 @@ Politeness delays applied between requests - ensures the crawler doesn't overwhe
   - Console errors: None (favicon 404 only - cosmetic)
   - Result: STILL PASSING - no regression found
 [Testing] Session complete - verified Feature #14 still passing
+[Testing] 2026-01-19 19:45 - Regression test for Feature #148 (Proper error propagation with ? operator)
+  - Step 1: Review error handling patterns ✅
+    - No unwrap() in production code (sus-core, sus-crawler, sus-dashboard)
+    - unwrap() only in test code and test fixture strings (acceptable)
+    - expect() only in Default impl where failure is unlikely
+  - Step 2: Verify ? used for propagation ✅
+    - sus-core/src/db.rs: 51 uses of ?
+    - sus-crawler: 28 uses across 4 files
+    - sus-dashboard: 3 uses
+  - Step 3: Verify thiserror/anyhow used appropriately ✅
+    - thiserror::Error for library errors (CratesIoError, DownloadError)
+    - anyhow::Result for application entry points (main.rs files)
+  - UI Verification: Error handling working correctly
+    - Non-existent crate shows proper 404 message
+    - Crate detail pages load correctly
+  - Screenshots:
+    - .playwright-mcp/.playwright-mcp/feature-148-regression-error-handling.png
+    - .playwright-mcp/.playwright-mcp/feature-148-regression-crate-detail.png
+  - Console errors: favicon 404 only (cosmetic)
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #148 still passing
+
+## Session: 2026-01-19 (Agent - Feature #23)
+
+### Feature #23: Severity classification is correct for each pattern
+**Status: PASSING** ✅
+
+#### Feature Description:
+Each pattern type has appropriate default severity - verify that the severity classification system assigns correct severity levels to all 12 pattern types.
+
+#### Verification Steps:
+
+**Step 1: Review severity mappings in code** ✅
+- File: `sus-detector/src/patterns.rs`, function `default_severity()`
+- Mappings confirmed:
+  - HIGH: SensitivePath, BuildDownload, Obfuscation
+  - MEDIUM: Network, ShellCommand, ProcessSpawn, FileAccess, DynamicLib, CompilerFlags, MacroCodegen
+  - LOW: EnvAccess, UnsafeBlock
+
+**Step 2: Test HIGH severity patterns** ✅
+- SensitivePath (`/etc/passwd`, `~/.ssh/id_rsa`, `~/.aws/credentials`) → HIGH ✅
+- BuildDownload (https URLs, .so/.dll files, .bytes() method) → HIGH ✅
+- Obfuscation (base64::decode, hex::decode) → HIGH ✅
+
+**Step 3: Test MEDIUM severity patterns** ✅
+- Network (reqwest, std::net, hyper) → MEDIUM ✅
+- ShellCommand (Command::new("sh"), arg("-c")) → MEDIUM ✅
+- ProcessSpawn (.wait(), .spawn()) → MEDIUM ✅
+- FileAccess (std::fs::read/write/remove_file) → MEDIUM ✅
+- DynamicLib (libloading, dlopen) → MEDIUM ✅
+- CompilerFlags (cargo:rustc-link-lib, cargo:rustc-link-search) → MEDIUM ✅
+
+**Step 4: Test LOW severity patterns** ✅
+- EnvAccess (std::env::var generic) → LOW ✅
+- UnsafeBlock (unsafe { }) → LOW ✅
+- Note: std::env::var("HOME") correctly upgraded to HIGH (sensitive env var)
+
+**Step 5: Verify via dashboard UI** ✅
+- Dashboard landing page shows severity breakdown (3 High, 1 Medium, 1 Low)
+- Crate detail page shows correct severity badges:
+  - High (red badge) for Sensitive Path and Network Call
+  - Medium (orange badge) for Shell Command
+  - Low (gray badge) for Env Access
+
+#### Test Evidence:
+- Test file: test_severity_classification.rs
+- Payload: test_severity_payload.json
+- API test: 63 findings generated with correct severities
+- Screenshots:
+  - .playwright-mcp/.playwright-mcp/feature-23-dashboard-severity.png
+  - .playwright-mcp/.playwright-mcp/feature-23-crate-detail-severity.png
+  - .playwright-mcp/.playwright-mcp/feature-23-severity-medium-low.png
+- Console errors: favicon 404 only (cosmetic)
+
+#### Commit:
+- ecab0fc: Verify Feature #23: Severity classification is correct for each pattern
+
+#### Current Completion Status:
+- Features passing: 50/170 (29.4%)
+- Feature #23 (Severity classification is correct for each pattern) - PASSING ✅
