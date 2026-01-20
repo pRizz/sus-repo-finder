@@ -4078,3 +4078,76 @@ Spinners and loading indicators visible during API calls and page navigation.
 #### Current Completion Status:
 - Features passing: 56/170 (32.9%)
 - Feature #87 (Loading states shown during API calls) - PASSING ✅
+[Testing] 2026-01-20 - Regression test for Feature #15 (Pattern detector identifies env variable access)
+  - Step 1: Verified SENSITIVE_ENV_VARS list includes HOME, AWS_SECRET_KEY, GITHUB_TOKEN, etc. ✅
+  - Step 2: Detector running and integrated with dashboard ✅
+  - Step 3: Env Access pattern detected ✅
+    - Finding visible in dashboard for anyhow crate
+    - Issue type: 'Env Access'
+    - Code snippet: std::env::var(RUSTC)
+  - Step 4: Severity levels verified ✅
+    - Non-sensitive vars (RUSTC): Low severity
+    - Sensitive vars (AWS_SECRET_ACCESS_KEY, HOME, etc.): High severity (code verified)
+    - Unit tests confirm behavior: test_env_access_has_low_severity, test_sensitive_env_var_has_high_severity
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #15 still passing
+
+## Session: 2026-01-20 (Agent - Feature #90)
+
+### Feature #90: Smooth hover effects on interactive elements
+**Status: PASSING** ✅
+
+#### Feature Description:
+Buttons and links have hover transitions - verify that all interactive elements have smooth hover effects.
+
+#### Verification Steps:
+
+**Step 1: Hover over navigation links** ✅
+- Dashboard link: text-gray-300 → text-white (hover state visible)
+- Crates link: same behavior
+- Both have `transition-colors` class for smooth transition
+
+**Step 2: Verify color transition smooth** ✅
+- All links/buttons use `transition-colors` Tailwind class
+- Color changes smoothly on hover (not instant)
+- No jarring visual effects
+
+**Step 3: Hover over crate cards/rows** ✅
+- Table rows have `hover:bg-dark-bg transition-colors`
+- Row background darkens on hover
+- Crate name links change from blue-400 to blue-300 on hover
+
+**Step 4: Verify hover state visible** ✅
+- Navigation links: gray → white
+- Crate links: blue-400 → blue-300
+- Buttons: bg-blue-600 → bg-blue-700 (Browse All Crates)
+- Crawler portal cards: border changes to accent color, title text to accent
+- Start Crawler button: green-600 → green-700
+- Pagination links: bg-dark-border on hover
+
+#### Hover Effects Found in Templates:
+- Dashboard (base.html, landing.html, crate_list.html, crate_detail.html, error.html, not_found.html)
+- Crawler Portal (base.html, status.html, detailed.html)
+- All use `hover:` prefixed classes with `transition-colors`
+
+#### Test Evidence:
+- Screenshots:
+  - feature-90-initial-state.png
+  - feature-90-dashboard-link-hover.png
+  - feature-90-crates-link-hover.png
+  - feature-90-browse-button-hover.png
+  - feature-90-crate-link-hover.png
+  - feature-90-crate-list.png
+  - feature-90-row-hover.png
+  - feature-90-pagination-hover.png
+  - feature-90-crawler-portal.png
+  - feature-90-card-hover.png
+  - feature-90-button-hover.png
+- Console errors: favicon 404 only (cosmetic)
+
+#### Commit:
+- 39a9a75: Verify Feature #90: Smooth hover effects on interactive elements
+
+#### Current Completion Status:
+- Features passing: 59/170 (34.7%)
+- Feature #90 (Smooth hover effects on interactive elements) - PASSING ✅
