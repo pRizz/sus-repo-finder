@@ -86,11 +86,11 @@
                 <label for="severity-filter" class="text-sm text-gray-400">Severity:</label>
                 <select id="severity-filter" name="severity" onchange="updateFilter('severity', this.value)"
                     class="bg-dark-bg border border-dark-border text-gray-300 text-sm rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
-                    <option value="">All</option>
-                    <option value="high">High</option>
-                    <option value="medium">Medium</option>
-                    <option value="low">Low</option>
-                    <option value="none">No Findings</option>
+                    <option value="" {% match severity %}{% when None %}selected{% when Some(s) %}{% if s.is_empty() %}selected{% endif %}{% endmatch %}>All</option>
+                    <option value="high" {% match severity %}{% when Some(s) %}{% if s == "high" %}selected{% endif %}{% when None %}{% endmatch %}>High</option>
+                    <option value="medium" {% match severity %}{% when Some(s) %}{% if s == "medium" %}selected{% endif %}{% when None %}{% endmatch %}>Medium</option>
+                    <option value="low" {% match severity %}{% when Some(s) %}{% if s == "low" %}selected{% endif %}{% when None %}{% endmatch %}>Low</option>
+                    <option value="none" {% match severity %}{% when Some(s) %}{% if s == "none" %}selected{% endif %}{% when None %}{% endmatch %}>No Findings</option>
                 </select>
             </div>
 
@@ -280,7 +280,7 @@
         <div class="flex flex-1 justify-between sm:justify-end gap-2">
             <!-- Previous button -->
             {% if has_prev %}
-            <a href="/crates?page={{ prev_page }}&per_page={{ per_page }}{% match search %}{% when Some(s) %}&search={{ s }}{% when None %}{% endmatch %}{% match sort %}{% when Some(s) %}{% if !s.is_empty() %}&sort={{ s }}{% endif %}{% when None %}{% endmatch %}"
+            <a href="/crates?page={{ prev_page }}&per_page={{ per_page }}{% match search %}{% when Some(s) %}&search={{ s }}{% when None %}{% endmatch %}{% match sort %}{% when Some(s) %}{% if !s.is_empty() %}&sort={{ s }}{% endif %}{% when None %}{% endmatch %}{% match severity %}{% when Some(s) %}{% if !s.is_empty() %}&severity={{ s }}{% endif %}{% when None %}{% endmatch %}"
                class="relative inline-flex items-center rounded-md bg-dark-bg px-3 py-2 text-sm font-semibold text-gray-300 ring-1 ring-inset ring-dark-border hover:bg-dark-border transition-colors">
                 <svg class="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
                     <path fill-rule="evenodd" d="M12.79 5.23a.75.75 0 01-.02 1.06L8.832 10l3.938 3.71a.75.75 0 11-1.04 1.08l-4.5-4.25a.75.75 0 010-1.08l4.5-4.25a.75.75 0 011.06.02z" clip-rule="evenodd" />
@@ -304,7 +304,7 @@
                         {{ pn.number }}
                     </span>
                     {% else %}
-                    <a href="/crates?page={{ pn.number }}&per_page={{ per_page }}{% match search %}{% when Some(s) %}&search={{ s }}{% when None %}{% endmatch %}{% match sort %}{% when Some(s) %}{% if !s.is_empty() %}&sort={{ s }}{% endif %}{% when None %}{% endmatch %}"
+                    <a href="/crates?page={{ pn.number }}&per_page={{ per_page }}{% match search %}{% when Some(s) %}&search={{ s }}{% when None %}{% endmatch %}{% match sort %}{% when Some(s) %}{% if !s.is_empty() %}&sort={{ s }}{% endif %}{% when None %}{% endmatch %}{% match severity %}{% when Some(s) %}{% if !s.is_empty() %}&severity={{ s }}{% endif %}{% when None %}{% endmatch %}"
                        class="relative inline-flex items-center px-4 py-2 text-sm font-semibold text-gray-300 bg-dark-bg ring-1 ring-inset ring-dark-border hover:bg-dark-border rounded-md transition-colors">
                         {{ pn.number }}
                     </a>
@@ -314,7 +314,7 @@
 
             <!-- Next button -->
             {% if has_next %}
-            <a href="/crates?page={{ next_page }}&per_page={{ per_page }}{% match search %}{% when Some(s) %}&search={{ s }}{% when None %}{% endmatch %}{% match sort %}{% when Some(s) %}{% if !s.is_empty() %}&sort={{ s }}{% endif %}{% when None %}{% endmatch %}"
+            <a href="/crates?page={{ next_page }}&per_page={{ per_page }}{% match search %}{% when Some(s) %}&search={{ s }}{% when None %}{% endmatch %}{% match sort %}{% when Some(s) %}{% if !s.is_empty() %}&sort={{ s }}{% endif %}{% when None %}{% endmatch %}{% match severity %}{% when Some(s) %}{% if !s.is_empty() %}&severity={{ s }}{% endif %}{% when None %}{% endmatch %}"
                class="relative inline-flex items-center rounded-md bg-dark-bg px-3 py-2 text-sm font-semibold text-gray-300 ring-1 ring-inset ring-dark-border hover:bg-dark-border transition-colors">
                 Next
                 <svg class="h-5 w-5 ml-1" viewBox="0 0 20 20" fill="currentColor">

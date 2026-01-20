@@ -164,6 +164,8 @@ pub struct CrateListPageQuery {
     pub per_page: Option<u32>,
     pub search: Option<String>,
     pub sort: Option<String>,
+    pub severity: Option<String>,
+    pub issue_type: Option<String>,
 }
 
 async fn crate_list(
@@ -174,13 +176,26 @@ async fn crate_list(
     let per_page = query.per_page.unwrap_or(10).clamp(1, 100);
     let search = query.search.filter(|s| !s.trim().is_empty());
     let sort = query.sort.clone().unwrap_or_default();
+    let severity = query.severity.filter(|s| !s.trim().is_empty());
+    let issue_type = query.issue_type.filter(|s| !s.trim().is_empty());
 
-    // Get total count for pagination (with search filter if applicable)
+    // Get total count for pagination (with filters if applicable)
     let total_crates = if let Some(ref search_term) = search {
         match state.db.count_crates_search(search_term).await {
             Ok(count) => count,
             Err(err) => {
                 tracing::error!("Database error getting search count: {}", err);
+                return render_with_status(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    ErrorTemplate::server_error(),
+                );
+            }
+        }
+    } else if let Some(ref sev) = severity {
+        match state.db.count_crates_by_severity(sev).await {
+            Ok(count) => count,
+            Err(err) => {
+                tracing::error!("Database error getting severity count: {}", err);
                 return render_with_status(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     ErrorTemplate::server_error(),
@@ -227,11 +242,16 @@ async fn crate_list(
         })
         .collect();
 
-    // Get paginated crates (with search filter and sort if applicable)
+    // Get paginated crates (with filters applied)
     let crates_result = if let Some(ref search_term) = search {
         state
             .db
             .search_crates_paginated(search_term, page, per_page)
+            .await
+    } else if let Some(ref sev) = severity {
+        state
+            .db
+            .get_crates_by_severity(sev, page, per_page, &sort)
             .await
     } else {
         // Use sorted query when sort is specified
@@ -257,6 +277,8 @@ async fn crate_list(
             page_numbers,
             search,
             sort: query.sort,
+            severity,
+            issue_type,
         })
         .into_response(),
         Err(err) => {

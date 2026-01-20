@@ -6933,3 +6933,91 @@ Single crate endpoint works - verifies that the GET /api/crates/:name endpoint r
 #### Current Completion Status:
 - Features passing: 97/170 (57.1%)
 - Feature #141 (API /api/crates/:name returns crate detail) - PASSING ✅
+[Testing] Feature #107 (Desktop layout correct at 1920px) verified - still passing
+[Testing] Session complete - verified feature #107 (no regression found)
+[Testing] Feature #117 (ARIA labels on icon-only buttons) verified - still passing
+[Testing] Verification details:
+  - Checked Dashboard page: All links with icons have visible text labels
+  - Checked Crates List page: Pagination controls have text ('Previous', 'Next')
+  - Checked Crate Detail page: All links have text labels
+  - Checked Crawler Portal: All buttons have text ('Pause Crawler', 'Start Crawler', 'Clear')
+  - No icon-only buttons found in the application
+  - Application follows good accessibility practices by including text with all icons
+  - No console errors detected
+[Testing] Session complete - verified feature #117 (no regression found)
+
+
+## Session: 2026-01-20 (Agent - Feature #48)
+
+### Feature #48: Crawler pause control works
+**Status: PASSING** ✅
+
+#### Feature Description:
+Pause button stops processing - verifies that clicking the "Pause Crawler" button stops the crawler from processing new crates.
+
+#### Implementation:
+
+**Step 1: Updated pause() handler in sus-crawler/src/api.rs**
+- Now accepts state parameter and persists pause to database
+- Gets the latest crawler run from crawler_state table
+- Calls pause_crawler_run() to set status to 'paused'
+- Returns JSON with success message
+
+**Step 2: Updated resume() handler in sus-crawler/src/api.rs**
+- Now accepts state parameter and persists resume to database
+- Gets the latest crawler run from crawler_state table
+- Calls new resume_crawler_run() to set status back to 'running'
+- Returns JSON with success message
+
+**Step 3: Added resume_crawler_run() to sus-core/src/db.rs**
+- Sets status to 'running' and updates last_checkpoint
+- Complements existing pause_crawler_run() function
+
+**Step 4: Updated index() status determination**
+- Now checks crawler_state table first for pause/resume state
+- Falls back to queue-based inference if no crawler state exists
+- Status correctly shows "paused" when crawler is paused
+
+#### Verification Steps:
+
+**Step 1: Start crawler** ✅
+- Crawler running on port 3001
+- Status shows "Running" with green indicator
+- "Pause Crawler" button visible
+
+**Step 2: Click pause button** ✅
+- Clicked "Pause Crawler" button
+- API returned: {"message":"Crawler paused successfully","status":"paused","success":true}
+
+**Step 3: Verify crawler pauses after current crate** ✅
+- Database crawler_state table updated to status="paused"
+- Last checkpoint timestamp updated
+
+**Step 4: Verify status shows paused** ✅
+- Page reloaded shows "Paused" in header (orange indicator)
+- Button changed to "Start Crawler" (green)
+
+**Step 5: Verify no new crates started** ✅
+- Pending queue still has 83 crates waiting
+- No new crates moved to in_progress after pause
+- Queue state unchanged
+
+#### Test Evidence:
+- Screenshots:
+  - feature-48-step1-running-state.png - Crawler showing "Running" status
+  - feature-48-step4-paused-state.png - Crawler showing "Paused" status
+- Verification scripts:
+  - verify_feature_48_complete.js - Complete verification (all checks pass)
+  - verify_pause_state.js - Database state verification
+- Console errors: None
+
+#### Files Changed:
+- sus-crawler/src/api.rs - Updated pause(), resume(), index() handlers
+- sus-core/src/db.rs - Added resume_crawler_run() method
+
+#### Commit:
+- 3d9410b: Implement Feature #48: Crawler pause control works
+
+#### Current Completion Status:
+- Features passing: 98/170 (57.6%)
+- Feature #48 (Crawler pause control works) - PASSING ✅

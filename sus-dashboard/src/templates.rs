@@ -96,6 +96,10 @@ pub struct CrateListTemplate {
     pub search: Option<String>,
     // Sort order (recent, severity, downloads, or default)
     pub sort: Option<String>,
+    // Severity filter (high, medium, low, none, or empty for all)
+    pub severity: Option<String>,
+    // Issue type filter (network, file_access, shell_command, etc.)
+    pub issue_type: Option<String>,
 }
 
 /// Crate detail page template
