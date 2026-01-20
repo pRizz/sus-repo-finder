@@ -904,3 +904,57 @@ to make the changes take effect. The current running servers use older binaries.
 5. If all pass, mark feature #11 as passing
 
 **Feature moved to end of queue (priority 171) until verification complete.**
+[Testing] 2026-01-19 18:33:21 - Regression test for Feature #9 (init.sh script exists and is executable)
+  - Verified init.sh exists at project root
+  - Verified script has execute permissions (-rwxr-xr-x)
+  - Verified both servers running (crawler on 3001, dashboard on 3002)
+  - Browser automation confirmed both UIs load correctly
+  - Screenshots saved:
+    - .playwright-mcp/regression-feature-9-crawler.png
+    - .playwright-mcp/regression-feature-9-dashboard.png
+  - Only console error: favicon.ico 404 (cosmetic, not functional)
+  - All 3 verification steps PASS
+  - Feature still PASSING ✅
+[Testing] Session complete - verified Feature #9 (init.sh script exists and is executable) still passing
+
+### Session: 2026-01-19 (Feature #12)
+
+### Feature #12: Pattern detector identifies file system access
+**Status: PASSING**
+
+#### What was done:
+- Verified that FileAccessVisitor was already implemented in previous sessions
+- Added comprehensive tests for file access detection:
+  - test_detect_std_io_import: Tests detection of std::io::Read and std::io::Write imports
+  - test_detect_file_method_calls: Tests detection of read_to_string, write_all methods
+  - test_detect_directory_operations: Tests detection of create_dir_all, remove_dir_all
+  - test_detect_tokio_fs: Tests detection of async file operations
+- Fixed proc-macro2 span-locations feature to enable line number tracking
+- Fixed Axum route syntax (`:param` instead of `{param}`)
+- Fixed Askama template syntax in crate_detail.html
+
+#### File access patterns detected:
+- std::fs, std::io, File, OpenOptions imports
+- File operations: read_to_string, write, create, remove_file, etc.
+- Directory operations: create_dir, create_dir_all, remove_dir, read_dir
+- Async file I/O: tokio::fs, async_std::fs
+
+#### Changes made:
+1. Cargo.toml: Added `span-locations` feature to proc-macro2
+2. sus-detector/src/detector.rs: Added 4 new tests for file access detection
+3. sus-crawler/src/api.rs: Fixed route syntax to use `:param` format
+4. sus-dashboard/templates/crate_detail.html: Fixed Askama template syntax
+
+### Current Completion Status:
+- Features passing: 19/170 (11.2%)
+- Feature #12 (Pattern detector identifies file system access) - PASSING
+
+### Notes for next session:
+- File access detection is fully implemented and tested
+- Dashboard and crawler templates are now working properly
+- Detection system can identify:
+  - Network calls (reqwest, hyper, std::net, etc.)
+  - File access (std::fs, std::io, File operations)
+- Tests verify severity levels (Medium for file access)
+- Tests verify context extraction for findings
+
