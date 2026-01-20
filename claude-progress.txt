@@ -3055,3 +3055,66 @@ Code is properly formatted - verify that `cargo fmt --all -- --check` passes wit
   - Console errors: favicon 404 only (cosmetic)
   - Result: STILL PASSING - no regression found
 [Testing] Session complete - verified Feature #7 still passing
+[Testing] 2026-01-19 19:35 - Regression test for Feature #33 (Crawler stores analysis results in database)
+  - Step 1: Verified crates with findings exist (anyhow: 4, serde: 1) ✅
+  - Step 2: Queried data via dashboard API - results displayed correctly ✅
+  - Step 3: Verified issue_type: Sensitive Path, Network Call, Env Access, Shell Command ✅
+  - Step 4: Verified severity: High, Medium, Low all displayed correctly ✅
+  - Step 5: Verified file_path and line numbers: build.rs:5, build.rs:10, build.rs:15, build.rs:25 ✅
+  - Step 6: Verified code_snippet stored: actual code displayed in UI ✅
+  - Console errors: favicon 404 only (cosmetic)
+  - Screenshots: .playwright-mcp/feature-33-*.png
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #33 still passing
+[Testing] 2026-01-19 19:33 - Regression test for Feature #12 (Pattern detector identifies file system access)
+  - Step 1: Created test build.rs with std::fs::read, write, remove_file operations ✅
+  - Step 2: Ran detector via /api/crawler/test-detector API ✅
+  - Step 3: Verified file_access patterns detected (6 findings):
+    - std::fs::read ✅
+    - std::fs::write ✅
+    - std::fs::remove_file ✅
+  - Step 4: Verified sensitive path flagged as high severity:
+    - /etc/passwd → sensitive_path, HIGH severity ✅
+  - UI Verification: Dashboard shows Sensitive Path findings with correct severity badges
+  - Screenshot: .playwright-mcp/feature-12-regression-crate-detail.png
+  - Console errors: favicon 404 only (cosmetic)
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #12 still passing
+
+## Session: 2026-01-19 (Agent - Feature #154)
+
+### Feature #154: Cargo build succeeds
+**Status: PASSING** ✅
+
+#### Feature Description:
+Project compiles cleanly - verify that `cargo build` succeeds without errors.
+
+#### Verification Steps:
+
+**Step 1: Run cargo build --release (via init.sh)** ✅
+- Command: `./init.sh`
+- Initially encountered compilation error in sus-crawler/src/api.rs due to stale cached artifacts
+- After clearing cache: Build completed successfully
+
+**Step 2: Verify no errors** ✅
+- Build completed with warnings only (acceptable):
+  - sus-detector: 4 warnings (unused variables, dead code)
+  - sus-dashboard: 1 warning (unused struct fields)
+  - sus-crawler: 1 warning (unused function)
+- **Zero compilation errors**
+
+**Step 3: Verify binaries produced** ✅
+- sus-dashboard binary running on port 3002
+- sus-crawler binary running on port 3001
+- Both servers responding correctly
+
+#### Test Evidence:
+- Screenshots:
+  - .playwright-mcp/feature-154-dashboard-working.png
+  - .playwright-mcp/feature-154-crawler-working.png
+- Console errors: favicon 404 only (cosmetic)
+- Build output: "Finished `dev` profile [unoptimized + debuginfo] target(s)"
+
+#### Current Completion Status:
+- Features passing: 47/170 (27.6%)
+- Feature #154 (Cargo build succeeds) - PASSING ✅
