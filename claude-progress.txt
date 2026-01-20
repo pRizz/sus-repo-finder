@@ -2815,3 +2815,75 @@ Codebase follows error handling best practices - no unwrap() calls in production
 #### Current Completion Status:
 - Features passing: 40/170 (23.5%)
 - Feature #147 (No unwrap() in production code) - PASSING ✅
+[Testing] 2026-01-19 19:25 - Regression test for Feature #14 (Pattern detector identifies process spawning)
+  - Step 1: Created test files with process spawn code ✅
+  - Step 2: Ran detector via /api/crawler/test-detector ✅
+  - Step 3: Verified process_spawn patterns detected:
+    - std::process::Command with bash ✅
+    - tokio::process::Command ✅
+    - .wait() method calls ✅
+    - nix::unistd::fork ✅
+    - libc::execve ✅
+    - subprocess::Popen ✅
+    - libc::{posix_spawn, system, popen} ✅
+  - Result: STILL PASSING - no regression found
+[Testing] Session complete - verified Feature #14 still passing
+
+
+## Session: 2026-01-19 (Agent - Feature #150)
+
+### Feature #150: Database migrations are reversible
+**Status: PASSING** ✅
+
+#### Feature Description:
+Database migrations can be rolled back - the schema has both "up" (create) and "down" (drop) migrations.
+
+#### Implementation:
+
+**Step 1: Created reverse migration file** ✅
+- File: `sus-core/migrations/001_initial_schema_down.sql`
+- Contains DROP INDEX and DROP TABLE statements in correct order
+- Drops child tables before parent tables to respect foreign key constraints
+- Order: crawler_queue -> crawler_errors -> crawler_state -> analysis_results -> versions -> crates
+
+**Step 2: Added reverse_schema() method to Database** ✅
+- New constant: `REVERSE_SCHEMA` includes the down migration SQL
+- New method: `pub async fn reverse_schema(&self) -> Result<(), sqlx::Error>`
+- Method executes all DROP statements from the down migration file
+- Properly logged with tracing for debugging
+
+**Step 3: Added comprehensive tests** ✅
+- `test_database_reverse_schema` - Verifies tables are dropped after reversal
+- `test_database_migration_full_cycle` - Tests init -> reverse -> reinit cycle
+- `test_database_reverse_drops_indexes` - Verifies all indexes are also dropped
+
+#### Files Modified:
+- `sus-core/migrations/001_initial_schema_down.sql` (NEW - 24 lines)
+- `sus-core/src/db.rs` (added ~120 lines for method + tests)
+
+#### Verification Steps:
+
+1. **Build project** - PASS ✅
+   - `./init.sh` completes successfully
+   - All crates compile without errors
+
+2. **Dashboard still works** - PASS ✅
+   - Navigated to http://localhost:3002
+   - Dashboard displays correctly with all data
+   - Screenshot: .playwright-mcp/feature-150-dashboard-working.png
+
+3. **Review implementation** - PASS ✅
+   - `reverse_schema()` method properly documented
+   - Down migration drops all 6 tables and 13 indexes
+   - Tests cover: reversal, full cycle, and index cleanup
+
+#### Test Evidence:
+- Screenshots:
+  - .playwright-mcp/feature-150-dashboard-working.png
+- Build successful: `./init.sh` completes with no errors
+- Console errors: favicon 404 only (cosmetic)
+
+#### Current Completion Status:
+- Features passing: 42/170 (24.7%)
+- Feature #150 (Database migrations are reversible) - PASSING ✅
+

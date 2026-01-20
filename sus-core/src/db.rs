@@ -7,6 +7,9 @@ use tracing::{info, instrument};
 /// The SQL schema for initializing the database
 const INIT_SCHEMA: &str = include_str!("../migrations/001_initial_schema.sql");
 
+/// The SQL for reversing/dropping the schema
+const REVERSE_SCHEMA: &str = include_str!("../migrations/001_initial_schema_down.sql");
+
 /// Database connection pool wrapper
 pub struct Database {
     pool: SqlitePool,
@@ -61,6 +64,34 @@ impl Database {
         }
 
         info!("Database schema initialized successfully");
+        Ok(())
+    }
+
+    /// Reverse/drop the database schema
+    ///
+    /// This method runs the reverse migration to drop all tables and indexes.
+    /// Use this for rolling back migrations or resetting the database.
+    /// **Warning:** This will delete all data in the database.
+    #[instrument(skip(self))]
+    pub async fn reverse_schema(&self) -> Result<(), sqlx::Error> {
+        info!("Reversing database schema (dropping all tables)");
+
+        // Split schema into individual statements and execute them
+        for statement in REVERSE_SCHEMA.split(';') {
+            // Remove SQL comments (lines starting with --)
+            let cleaned: String = statement
+                .lines()
+                .filter(|line| !line.trim().starts_with("--"))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let trimmed = cleaned.trim();
+            if !trimmed.is_empty() {
+                sqlx::query(trimmed).execute(&self.pool).await?;
+            }
+        }
+
+        info!("Database schema reversed successfully");
         Ok(())
     }
 
@@ -475,6 +506,148 @@ impl Database {
 
         Ok(versions)
     }
+
+    /// Get findings for a version with comparison to previous version
+    ///
+    /// Returns findings for the selected version, plus any findings that existed
+    /// in older versions but were removed/fixed in this version.
+    /// Each finding is tagged with its status: Current, New, or Removed.
+    pub async fn get_findings_with_comparison(
+        &self,
+        crate_id: i64,
+        current_version_id: i64,
+    ) -> Result<Vec<crate::models::FindingWithStatus>, sqlx::Error> {
+        use crate::models::{FindingStatus, FindingWithStatus};
+
+        // Get all versions for this crate, ordered by id DESC (newest first)
+        let versions = self.get_versions_for_crate(crate_id).await?;
+
+        // Find the position of the current version
+        let current_pos = versions
+            .iter()
+            .position(|v| v.id == current_version_id);
+
+        // Get current version's findings
+        let current_findings = self.get_findings_by_version(current_version_id).await?;
+
+        // If there's no previous version, all current findings are just "Current"
+        let Some(current_idx) = current_pos else {
+            return Ok(current_findings
+                .into_iter()
+                .map(|f| FindingWithStatus {
+                    id: f.id,
+                    version_id: f.version_id,
+                    issue_type: f.issue_type,
+                    severity: f.severity,
+                    file_path: f.file_path,
+                    line_start: f.line_start,
+                    line_end: f.line_end,
+                    code_snippet: f.code_snippet,
+                    context_before: f.context_before,
+                    context_after: f.context_after,
+                    summary: f.summary,
+                    details: f.details,
+                    created_at: f.created_at,
+                    status: FindingStatus::Current,
+                    from_version: None,
+                })
+                .collect());
+        };
+
+        // Get the previous version (older = higher index)
+        let previous_version = if current_idx + 1 < versions.len() {
+            Some(&versions[current_idx + 1])
+        } else {
+            None
+        };
+
+        let mut result = Vec::new();
+
+        // Get previous version's findings if exists
+        let previous_findings = if let Some(prev_ver) = previous_version {
+            self.get_findings_by_version(prev_ver.id).await?
+        } else {
+            Vec::new()
+        };
+
+        // Create a key function to identify similar findings (issue_type + file_path + code_snippet)
+        let make_key = |issue_type: &str, file_path: &str, code_snippet: &Option<String>| -> String {
+            format!(
+                "{}:{}:{}",
+                issue_type,
+                file_path,
+                code_snippet.as_deref().unwrap_or("")
+            )
+        };
+
+        // Create a set of previous finding keys
+        let previous_keys: std::collections::HashSet<String> = previous_findings
+            .iter()
+            .map(|f| make_key(&f.issue_type, &f.file_path, &f.code_snippet))
+            .collect();
+
+        // Create a set of current finding keys
+        let current_keys: std::collections::HashSet<String> = current_findings
+            .iter()
+            .map(|f| make_key(&f.issue_type, &f.file_path, &f.code_snippet))
+            .collect();
+
+        // Add current findings with status
+        for f in current_findings {
+            let key = make_key(&f.issue_type, &f.file_path, &f.code_snippet);
+            let status = if previous_keys.contains(&key) {
+                FindingStatus::Current
+            } else {
+                FindingStatus::New
+            };
+
+            result.push(FindingWithStatus {
+                id: f.id,
+                version_id: f.version_id,
+                issue_type: f.issue_type,
+                severity: f.severity,
+                file_path: f.file_path,
+                line_start: f.line_start,
+                line_end: f.line_end,
+                code_snippet: f.code_snippet,
+                context_before: f.context_before,
+                context_after: f.context_after,
+                summary: f.summary,
+                details: f.details,
+                created_at: f.created_at,
+                status,
+                from_version: None,
+            });
+        }
+
+        // Add removed findings (existed in previous but not in current)
+        if let Some(prev_ver) = previous_version {
+            for f in previous_findings {
+                let key = make_key(&f.issue_type, &f.file_path, &f.code_snippet);
+                if !current_keys.contains(&key) {
+                    result.push(FindingWithStatus {
+                        id: f.id,
+                        version_id: f.version_id,
+                        issue_type: f.issue_type,
+                        severity: f.severity,
+                        file_path: f.file_path,
+                        line_start: f.line_start,
+                        line_end: f.line_end,
+                        code_snippet: f.code_snippet,
+                        context_before: f.context_before,
+                        context_after: f.context_after,
+                        summary: f.summary,
+                        details: f.details,
+                        created_at: f.created_at,
+                        status: FindingStatus::Removed,
+                        from_version: Some(prev_ver.version_number.clone()),
+                    });
+                }
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
@@ -570,6 +743,152 @@ mod tests {
                     .expect("Failed to query table existence");
 
             assert!(result.is_some(), "Table '{}' should exist", table_name);
+        }
+    }
+
+    /// Test that migrations can be reversed (rolled back)
+    #[tokio::test]
+    async fn test_database_reverse_schema() {
+        let db = Database::new_with_init("sqlite::memory:")
+            .await
+            .expect("Failed to create and initialize database");
+
+        // Verify tables exist first
+        let initialized = db
+            .is_initialized()
+            .await
+            .expect("Failed to check initialization");
+        assert!(initialized, "Database should be initialized before reversal");
+
+        // Reverse the schema
+        db.reverse_schema()
+            .await
+            .expect("Failed to reverse schema");
+
+        // Verify tables no longer exist
+        let initialized_after = db
+            .is_initialized()
+            .await
+            .expect("Failed to check initialization after reversal");
+        assert!(
+            !initialized_after,
+            "Database should not be initialized after reversal"
+        );
+
+        // Verify all tables are gone
+        let tables = [
+            "crates",
+            "versions",
+            "analysis_results",
+            "crawler_state",
+            "crawler_errors",
+            "crawler_queue",
+        ];
+
+        for table_name in tables {
+            let result: Option<(i32,)> =
+                sqlx::query_as("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
+                    .bind(table_name)
+                    .fetch_optional(db.pool())
+                    .await
+                    .expect("Failed to query table existence");
+
+            assert!(
+                result.is_none(),
+                "Table '{}' should not exist after reversal",
+                table_name
+            );
+        }
+    }
+
+    /// Test that migrations can be applied, reversed, and reapplied (full cycle)
+    #[tokio::test]
+    async fn test_database_migration_full_cycle() {
+        let db = Database::new("sqlite::memory:")
+            .await
+            .expect("Failed to create database");
+
+        // Initially not initialized
+        assert!(
+            !db.is_initialized().await.expect("Failed to check"),
+            "Should not be initialized initially"
+        );
+
+        // Apply migration (up)
+        db.init_schema().await.expect("Failed to init schema");
+        assert!(
+            db.is_initialized().await.expect("Failed to check"),
+            "Should be initialized after init"
+        );
+
+        // Reverse migration (down)
+        db.reverse_schema().await.expect("Failed to reverse schema");
+        assert!(
+            !db.is_initialized().await.expect("Failed to check"),
+            "Should not be initialized after reversal"
+        );
+
+        // Reapply migration (up again)
+        db.init_schema().await.expect("Failed to reinit schema");
+        assert!(
+            db.is_initialized().await.expect("Failed to check"),
+            "Should be initialized after reinit"
+        );
+    }
+
+    /// Test that reverse migration drops indexes as well
+    #[tokio::test]
+    async fn test_database_reverse_drops_indexes() {
+        let db = Database::new_with_init("sqlite::memory:")
+            .await
+            .expect("Failed to create and initialize database");
+
+        // Verify some indexes exist before reversal
+        let index_result: Option<(i32,)> =
+            sqlx::query_as("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_crates_name'")
+                .fetch_optional(db.pool())
+                .await
+                .expect("Failed to query index existence");
+        assert!(
+            index_result.is_some(),
+            "Index 'idx_crates_name' should exist before reversal"
+        );
+
+        // Reverse the schema
+        db.reverse_schema()
+            .await
+            .expect("Failed to reverse schema");
+
+        // Verify indexes are gone
+        let expected_indexes = [
+            "idx_crates_name",
+            "idx_crates_downloads",
+            "idx_versions_crate_id",
+            "idx_versions_status",
+            "idx_results_version_id",
+            "idx_results_severity",
+            "idx_results_issue_type",
+            "idx_results_created_at",
+            "idx_crawler_state_started",
+            "idx_crawler_errors_run_id",
+            "idx_crawler_errors_occurred",
+            "idx_queue_status",
+            "idx_queue_priority",
+        ];
+
+        for index_name in expected_indexes {
+            let result: Option<(i32,)> =
+                sqlx::query_as("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?")
+                    .bind(index_name)
+                    .fetch_optional(db.pool())
+                    .await
+                    .expect("Failed to query index existence");
+
+            assert!(
+                result.is_none(),
+                "Index '{}' should not exist after reversal",
+                index_name
+            );
         }
     }
 }
