@@ -1,0 +1,3 @@
+{
+  "source": "use std::ptr;\nfn main() {\n    unsafe {\n        let x: *mut i32 = std::ptr::null_mut();\n        *x = 42;\n        let ptr = std::alloc::alloc(std::alloc::Layout::new::<i32>());\n        std::ptr::write(ptr as *mut i32, 100);\n        std::ptr::read(ptr as *const i32);\n        std::alloc::dealloc(ptr, std::alloc::Layout::new::<i32>());\n    }\n}"
+}

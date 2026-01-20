@@ -235,6 +235,89 @@ const DYNAMIC_LIB_METHODS: &[&str] = &[
     "dlclose",
 ];
 
+/// Process spawning patterns to detect.
+/// These indicate low-level process creation that is distinct from shell commands.
+/// Focuses on fork/exec patterns and async process spawning.
+const PROCESS_SPAWN_PATTERNS: &[&str] = &[
+    // Unix process creation via nix crate
+    "nix::unistd::fork",
+    "nix::unistd::execve",
+    "nix::unistd::execvp",
+    "nix::unistd::execv",
+    "nix::unistd::execvpe",
+    "nix::unistd::fexecve",
+    "nix::unistd::daemon",
+    "nix::unistd::setsid",
+    // libc bindings for process creation
+    "libc::fork",
+    "libc::vfork",
+    "libc::execve",
+    "libc::execvp",
+    "libc::execv",
+    "libc::execl",
+    "libc::execlp",
+    "libc::execle",
+    "libc::posix_spawn",
+    "libc::posix_spawnp",
+    "libc::system",
+    "libc::popen",
+    "libc::_exit",
+    "libc::wait",
+    "libc::waitpid",
+    // Async process spawning
+    "tokio::process",
+    "async_std::process",
+    "smol::process",
+    // Subprocess crate
+    "subprocess",
+    "Popen",
+    "Exec",
+    // duct crate for shell pipelines
+    "duct",
+    "cmd!",
+    // run_script crate
+    "run_script",
+    // Process builder patterns
+    "Child",
+    "ExitStatus",
+    "ChildStdin",
+    "ChildStdout",
+    "ChildStderr",
+];
+
+/// Process spawn method names that indicate process creation
+const PROCESS_SPAWN_METHODS: &[&str] = &[
+    // Core spawning methods
+    "fork",
+    "vfork",
+    "execve",
+    "execvp",
+    "execv",
+    "execl",
+    "execlp",
+    "execle",
+    "posix_spawn",
+    "posix_spawnp",
+    "daemon",
+    "setsid",
+    // Process interaction
+    "wait",
+    "waitpid",
+    "kill",
+    "signal",
+    // popen-style
+    "popen",
+    "pclose",
+    // Subprocess methods
+    "detach",
+    "join",
+    "communicate",
+    "poll",
+    "terminate",
+    // Async spawn
+    "spawn_blocking",
+];
+
 /// The main pattern detector
 pub struct Detector {
     // Configuration options can be added here
@@ -309,9 +392,17 @@ impl Detector {
         visitor.findings
     }
 
-    fn detect_process_spawn(&self, _ast: &syn::File, _source: &str, _path: &str) -> Vec<Finding> {
-        // TODO: Implement process spawn detection
-        Vec::new()
+    /// Detect process spawning patterns that could indicate fork/exec attacks.
+    ///
+    /// Looks for:
+    /// - Unix fork/exec patterns (nix crate, libc bindings)
+    /// - Async process spawning (tokio::process, async_std::process)
+    /// - Subprocess crate usage
+    /// - Low-level process manipulation (wait, kill, signal)
+    fn detect_process_spawn(&self, ast: &syn::File, source: &str, path: &str) -> Vec<Finding> {
+        let mut visitor = ProcessSpawnVisitor::new(source, path);
+        visitor.visit_file(ast);
+        visitor.findings
     }
 
     /// Detect environment variable access that could leak sensitive data.
