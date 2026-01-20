@@ -3457,3 +3457,90 @@ Each pattern type has appropriate default severity - verify that the severity cl
 #### Current Completion Status:
 - Features passing: 50/170 (29.4%)
 - Feature #23 (Severity classification is correct for each pattern) - PASSING ✅
+
+## Session: 2026-01-19 (Agent - Feature #46)
+
+### Feature #46: Crawler portal detailed view shows live logs
+**Status: PASSING** ✅
+
+#### Feature Description:
+SSE endpoint streams log messages - detailed view shows real-time logs without page refresh.
+
+#### Implementation Summary:
+
+1. **Added tokio-stream dependency** (Cargo.toml, sus-crawler/Cargo.toml)
+   - Version 0.1 with `sync` feature for BroadcastStream
+
+2. **Created LogMessage struct** (sus-crawler/src/api.rs)
+   - Fields: level, message, target (optional), timestamp
+   - Serializable for JSON transmission via SSE
+
+3. **Added log broadcast channel to AppState** (sus-crawler/src/api.rs)
+   - broadcast::channel<LogMessage> with 100 message buffer
+   - send_log() helper method for easy log broadcasting
+
+4. **Implemented SSE endpoint** (sus-crawler/src/api.rs)
+   - GET /api/crawler/logs streams log messages
+   - Uses BroadcastStream to convert broadcast receiver to Stream
+   - Includes heartbeat every 15 seconds to keep connection alive
+   - Sends initial "SSE client connected" message on connect
+
+5. **Created DetailedTemplate** (sus-crawler/src/templates.rs)
+   - Same fields as StatusTemplate for stats display
+   - Renders detailed.html template
+
+6. **Created detailed.html template** (sus-crawler/templates/detailed.html)
+   - Live log viewer with auto-scroll
+   - Connection status indicator (Connected/Disconnected)
+   - Clear logs button
+   - Log level legend (Debug, Info, Warning, Error)
+   - Color-coded log messages by severity
+   - Stats cards at top (compact view)
+
+7. **Updated resume handler** (sus-crawler/src/api.rs)
+   - Sends "Crawler resume requested" log message to demonstrate SSE
+
+#### Verification Steps:
+
+1. **Step 1: Navigate to /detailed** - PASS ✅
+   - Page loads with title "Detailed View - Crawler Portal"
+   - Live Logs section visible with connection status
+
+2. **Step 2: Start or resume crawler** - PASS ✅
+   - Called POST /api/crawler/resume
+   - Log message sent via broadcast channel
+
+3. **Step 3: Verify log messages appear** - PASS ✅
+   - "SSE client connected to log stream" message visible
+   - "Crawler resume requested" message appeared
+   - Heartbeat messages visible
+
+4. **Step 4: Verify messages update in real-time** - PASS ✅
+   - Log messages appeared without any page interaction
+   - Timestamps show real-time updates
+
+5. **Step 5: Verify no page refresh needed** - PASS ✅
+   - Page URL stayed at http://localhost:3001/detailed
+   - Messages streamed via EventSource (SSE)
+
+#### Files Modified:
+- Cargo.toml (added tokio-stream with sync feature)
+- Cargo.lock (updated dependencies)
+- sus-crawler/Cargo.toml (added tokio-stream)
+- sus-crawler/src/api.rs (added ~120 lines for SSE, LogMessage, broadcast)
+- sus-crawler/src/templates.rs (added DetailedTemplate ~60 lines)
+- sus-crawler/templates/detailed.html (new file, ~200 lines)
+
+#### Test Evidence:
+- Screenshots:
+  - .playwright-mcp/feature-46-detailed-view-initial.png
+  - .playwright-mcp/feature-46-live-logs-working.png
+- Console errors: None (favicon 404 only - cosmetic)
+- Build: Successful with init.sh
+
+#### Commit:
+- 85c7b3b: Implement Feature #46: Crawler portal detailed view shows live logs
+
+#### Current Completion Status:
+- Features passing: 52/170 (30.6%)
+- Feature #46 (Crawler portal detailed view shows live logs) - PASSING ✅
