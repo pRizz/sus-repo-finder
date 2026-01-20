@@ -5140,3 +5140,67 @@ Added CSS focus-visible styles to both dashboard and crawler templates:
 - Features passing: 73/170 (42.9%)
 - Feature #115 (Focus ring visible on focused elements) - PASSING ✅
 
+[Testing] Feature #10 (Git repository initialized) verified - still passing
+[Testing] Feature #112 (Navigation responsive on mobile) verified - still passing
+
+
+## Session: 2026-01-20 (Agent - Feature #116)
+
+### Feature #116: Form fields have labels
+**Status: PASSING** ✅
+
+#### Feature Description:
+Accessibility labels on inputs - verify that form fields (search inputs, dropdowns) have proper accessibility labels.
+
+#### Verification Steps:
+
+**Step 1: Load page with search input** ✅
+- Dashboard loaded at http://localhost:3011/
+- Search input present in navigation bar
+
+**Step 2: Verify label element present** ✅
+- Label element found: `<label for="nav-search" class="sr-only">Search crates</label>`
+- Label is visually hidden (sr-only class) but accessible to screen readers
+- Label text: "Search crates"
+
+**Step 3: Verify label associated with input** ✅
+- Label `for="nav-search"` matches input `id="nav-search"`
+- `labelMatchesId: true` confirmed via JavaScript inspection
+- Additional `aria-label="Search crates"` provides redundant accessibility
+- Form has `role="search"` for proper semantics
+
+#### Additional Form Fields Verified:
+All form fields across the application have proper labels:
+
+**Crate List Page (/crates):**
+- Sort dropdown: `<label for="sort-desktop">Sort by:</label>`
+- Severity filter: `<label for="severity-filter">Severity:</label>`
+- Issue Type filter: `<label for="issue-filter">Issue Type:</label>`
+- Downloads filter: `<label for="downloads-filter">Downloads:</label>`
+
+**Crate Detail Page (/crates/{name}):**
+- Version selector: `<label for="version-select">Version:</label>`
+
+**Navigation (all pages):**
+- Search input: `<label for="nav-search" class="sr-only">Search crates</label>`
+
+#### Implementation Details:
+- Added `role="search"` to search form
+- Added hidden label with `class="sr-only"` for screen readers
+- Added `id="nav-search"` to input to match label's `for` attribute
+- Added `aria-label="Search crates"` as backup accessibility attribute
+
+#### Test Evidence:
+- Screenshots:
+  - feature-116-form-labels-dashboard.png - Dashboard showing search with label
+  - feature-116-form-labels-crates.png - Crates list showing all filter labels
+  - feature-116-form-labels-crate-detail.png - Crate detail showing version label
+- Console errors: None (only favicon 404 - cosmetic)
+
+#### Commit:
+- a37532b: Verify Feature #116: Form fields have labels
+
+#### Current Completion Status:
+- Features passing: 74/170 (43.5%)
+- Feature #116 (Form fields have labels) - PASSING ✅
+
