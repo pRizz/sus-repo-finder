@@ -92,6 +92,10 @@ pub struct CrateListTemplate {
     pub has_prev: bool,
     pub has_next: bool,
     pub page_numbers: Vec<PageNumber>,
+    // Search term (if searching)
+    pub search: Option<String>,
+    // Sort order (recent, severity, downloads, or default)
+    pub sort: Option<String>,
 }
 
 /// Crate detail page template
@@ -108,3 +112,60 @@ pub struct CrateDetailTemplate {
 #[derive(Template)]
 #[template(path = "not_found.html")]
 pub struct NotFoundTemplate;
+
+/// Generic error page template for user-friendly error display
+#[derive(Template)]
+#[template(path = "error.html")]
+pub struct ErrorTemplate {
+    /// Page title (shown in browser tab)
+    pub title: String,
+    /// HTTP error code (e.g., "404", "500")
+    pub error_code: String,
+    /// Main heading (e.g., "Page Not Found", "Server Error")
+    pub heading: String,
+    /// User-friendly error message
+    pub message: String,
+    /// Error type for conditional rendering (not_found, crate_not_found, server_error)
+    pub error_type: String,
+}
+
+impl ErrorTemplate {
+    /// Create a "crate not found" error page
+    pub fn crate_not_found(crate_name: &str) -> Self {
+        Self {
+            title: format!("Crate '{}' Not Found", crate_name),
+            error_code: "404".to_string(),
+            heading: "Crate Not Found".to_string(),
+            message: format!(
+                "The crate '{}' could not be found in our database. It may not have been scanned yet, or the name may be incorrect.",
+                crate_name
+            ),
+            error_type: "crate_not_found".to_string(),
+        }
+    }
+
+    /// Create a "version not found" error page
+    pub fn version_not_found(crate_name: &str, version: &str) -> Self {
+        Self {
+            title: format!("Version {} Not Found", version),
+            error_code: "404".to_string(),
+            heading: "Version Not Found".to_string(),
+            message: format!(
+                "Version '{}' of crate '{}' could not be found. The version may not exist or hasn't been analyzed yet.",
+                version, crate_name
+            ),
+            error_type: "not_found".to_string(),
+        }
+    }
+
+    /// Create a generic server error page (hides technical details)
+    pub fn server_error() -> Self {
+        Self {
+            title: "Server Error".to_string(),
+            error_code: "500".to_string(),
+            heading: "Something Went Wrong".to_string(),
+            message: "We encountered an unexpected error while processing your request. Please try again later.".to_string(),
+            error_type: "server_error".to_string(),
+        }
+    }
+}
