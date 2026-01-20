@@ -85,7 +85,10 @@ impl AppState {
 }
 
 /// Create the API router
-pub fn create_router(db: Database) -> Router {
+///
+/// # Arguments
+/// * `db` - Arc-wrapped database connection for sharing across handlers
+pub fn create_router(db: Arc<Database>) -> Router {
     let crates_io_client = CratesIoClient::new().expect("Failed to create crates.io client");
 
     // Create cache directory for downloaded crates
@@ -98,7 +101,7 @@ pub fn create_router(db: Database) -> Router {
     let (log_sender, _) = broadcast::channel::<LogMessage>(100);
 
     let state = Arc::new(AppState {
-        db: Arc::new(db),
+        db,
         crates_io_client: Arc::new(crates_io_client),
         crate_downloader: Arc::new(crate_downloader),
         log_sender,
@@ -194,13 +197,32 @@ async fn index(
         .as_ref()
         .map(|item| format!("{} v{}", item.crate_name, item.version));
 
-    // Determine status based on whether there's processing happening
-    let status = if in_progress_item.is_some() {
-        "running"
-    } else if queue_size > 0 {
-        "paused"
-    } else {
-        "idle"
+    // Determine status from crawler_state table first, then fall back to queue-based inference
+    let crawler_state = state.db.get_latest_crawler_state().await.ok().flatten();
+    let status = match crawler_state.as_ref().map(|s| s.status.as_str()) {
+        Some("paused") => "paused",
+        Some("running") => {
+            // Crawler says running - verify with queue state
+            if in_progress_item.is_some() {
+                "running"
+            } else if queue_size > 0 {
+                "paused" // Nothing in progress but queue has items
+            } else {
+                "idle"
+            }
+        }
+        Some("completed") => "idle",
+        Some("crashed") => "idle", // Treat crashed as idle for UI purposes
+        _ => {
+            // No crawler state - infer from queue
+            if in_progress_item.is_some() {
+                "running"
+            } else if queue_size > 0 {
+                "paused"
+            } else {
+                "idle"
+            }
+        }
     };
 
     // Calculate progress percentage
@@ -405,23 +427,154 @@ async fn api_errors(
     }))
 }
 
-async fn pause() -> impl IntoResponse {
-    Json(json!({
-        "success": true,
-        "status": "paused"
-    }))
+/// Pause the crawler
+/// POST /api/crawler/pause
+///
+/// This endpoint pauses the crawler by updating the crawler run status.
+/// The crawler will finish processing the current crate and stop picking up new ones.
+///
+/// Returns:
+/// - success: true if paused successfully
+/// - status: "paused"
+/// - message: human-readable message
+async fn pause(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+) -> impl IntoResponse {
+    // Get the latest crawler state to find the active run_id
+    match state.db.get_latest_crawler_state().await {
+        Ok(Some(crawler_state)) => {
+            // Only pause if currently running
+            if crawler_state.status == "running" {
+                match state.db.pause_crawler_run(&crawler_state.run_id).await {
+                    Ok(()) => {
+                        state.send_log("info", "Crawler paused by user", Some("crawler"));
+                        Json(json!({
+                            "success": true,
+                            "status": "paused",
+                            "message": "Crawler paused successfully"
+                        }))
+                        .into_response()
+                    }
+                    Err(e) => {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "success": false,
+                                "error": format!("Failed to pause crawler: {}", e)
+                            })),
+                        )
+                            .into_response()
+                    }
+                }
+            } else {
+                // Already paused or in another state
+                Json(json!({
+                    "success": true,
+                    "status": crawler_state.status,
+                    "message": format!("Crawler is already {}", crawler_state.status)
+                }))
+                .into_response()
+            }
+        }
+        Ok(None) => {
+            // No active run - that's okay, just acknowledge the pause request
+            Json(json!({
+                "success": true,
+                "status": "idle",
+                "message": "No active crawler run to pause"
+            }))
+            .into_response()
+        }
+        Err(e) => {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": format!("Failed to get crawler state: {}", e)
+                })),
+            )
+                .into_response()
+        }
+    }
 }
 
+/// Resume the crawler
+/// POST /api/crawler/resume
+///
+/// This endpoint resumes a paused crawler by updating the crawler run status.
+///
+/// Returns:
+/// - success: true if resumed successfully
+/// - status: "running"
+/// - message: human-readable message
 async fn resume(
     axum::extract::State(state): axum::extract::State<Arc<AppState>>,
 ) -> impl IntoResponse {
-    // Send a log message to demonstrate the SSE is working
-    state.send_log("info", "Crawler resume requested", Some("crawler"));
-
-    Json(json!({
-        "success": true,
-        "status": "running"
-    }))
+    // Get the latest crawler state to find the active run_id
+    match state.db.get_latest_crawler_state().await {
+        Ok(Some(crawler_state)) => {
+            // Only resume if currently paused
+            if crawler_state.status == "paused" {
+                match state.db.resume_crawler_run(&crawler_state.run_id).await {
+                    Ok(()) => {
+                        state.send_log("info", "Crawler resumed by user", Some("crawler"));
+                        Json(json!({
+                            "success": true,
+                            "status": "running",
+                            "message": "Crawler resumed successfully"
+                        }))
+                        .into_response()
+                    }
+                    Err(e) => {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "success": false,
+                                "error": format!("Failed to resume crawler: {}", e)
+                            })),
+                        )
+                            .into_response()
+                    }
+                }
+            } else if crawler_state.status == "running" {
+                // Already running
+                Json(json!({
+                    "success": true,
+                    "status": "running",
+                    "message": "Crawler is already running"
+                }))
+                .into_response()
+            } else {
+                // Completed or crashed - can't resume
+                Json(json!({
+                    "success": false,
+                    "status": crawler_state.status,
+                    "message": format!("Cannot resume crawler in '{}' state", crawler_state.status)
+                }))
+                .into_response()
+            }
+        }
+        Ok(None) => {
+            // No active run
+            state.send_log("info", "Crawler start requested (no existing run)", Some("crawler"));
+            Json(json!({
+                "success": true,
+                "status": "idle",
+                "message": "No crawler run to resume - start a new crawl"
+            }))
+            .into_response()
+        }
+        Err(e) => {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "success": false,
+                    "error": format!("Failed to get crawler state: {}", e)
+                })),
+            )
+                .into_response()
+        }
+    }
 }
 
 /// SSE endpoint for streaming live log messages

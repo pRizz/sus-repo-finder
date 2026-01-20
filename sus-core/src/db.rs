@@ -392,6 +392,155 @@ impl Database {
         Ok(count.0)
     }
 
+    /// Get crates filtered by severity level with pagination
+    ///
+    /// Returns crates that have at least one finding with the specified max severity.
+    /// If severity is "none", returns crates with no findings.
+    ///
+    /// # Arguments
+    /// * `severity` - The severity filter ("high", "medium", "low", or "none")
+    /// * `page` - The page number (1-indexed)
+    /// * `per_page` - Number of items per page
+    /// * `sort` - Sort order
+    pub async fn get_crates_by_severity(
+        &self,
+        severity: &str,
+        page: u32,
+        per_page: u32,
+        sort: &str,
+    ) -> Result<Vec<crate::models::CrateWithStats>, sqlx::Error> {
+        let offset = (page.saturating_sub(1)) * per_page;
+
+        // Build ORDER BY clause based on sort parameter
+        let order_by = match sort {
+            "recent" => "MAX(v.last_analyzed) DESC NULLS LAST, c.updated_at DESC",
+            "severity" => "CASE
+                WHEN max_sev = 'high' THEN 1
+                WHEN max_sev = 'medium' THEN 2
+                WHEN max_sev = 'low' THEN 3
+                ELSE 4 END, c.updated_at DESC",
+            "downloads" => "c.download_count DESC, c.updated_at DESC",
+            _ => "c.updated_at DESC",
+        };
+
+        if severity == "none" {
+            // Return crates with no findings
+            let query = format!(
+                r#"
+                SELECT
+                    c.id,
+                    c.name,
+                    c.repo_url,
+                    c.description,
+                    c.download_count,
+                    c.created_at,
+                    c.updated_at,
+                    0 as finding_count,
+                    NULL as max_severity
+                FROM crates c
+                LEFT JOIN versions v ON v.crate_id = c.id
+                LEFT JOIN analysis_results ar ON ar.version_id = v.id
+                GROUP BY c.id
+                HAVING COUNT(ar.id) = 0
+                ORDER BY {}
+                LIMIT ? OFFSET ?
+                "#,
+                order_by.replace("max_sev", "NULL")
+            );
+
+            let crates = sqlx::query_as::<_, crate::models::CrateWithStats>(&query)
+                .bind(per_page as i32)
+                .bind(offset as i32)
+                .fetch_all(&self.pool)
+                .await?;
+
+            Ok(crates)
+        } else {
+            // Return crates with the specified max severity
+            let query = format!(
+                r#"
+                SELECT
+                    c.id,
+                    c.name,
+                    c.repo_url,
+                    c.description,
+                    c.download_count,
+                    c.created_at,
+                    c.updated_at,
+                    (SELECT COUNT(*) FROM analysis_results ar2
+                     JOIN versions v2 ON ar2.version_id = v2.id
+                     WHERE v2.crate_id = c.id) as finding_count,
+                    (SELECT MAX(ar3.severity) FROM analysis_results ar3
+                     JOIN versions v3 ON ar3.version_id = v3.id
+                     WHERE v3.crate_id = c.id) as max_severity
+                FROM crates c
+                LEFT JOIN versions v ON v.crate_id = c.id
+                WHERE (SELECT MAX(ar4.severity) FROM analysis_results ar4
+                       JOIN versions v4 ON ar4.version_id = v4.id
+                       WHERE v4.crate_id = c.id) = ?
+                GROUP BY c.id
+                ORDER BY {}
+                LIMIT ? OFFSET ?
+                "#,
+                order_by.replace("max_sev", "max_severity")
+            );
+
+            let crates = sqlx::query_as::<_, crate::models::CrateWithStats>(&query)
+                .bind(severity)
+                .bind(per_page as i32)
+                .bind(offset as i32)
+                .fetch_all(&self.pool)
+                .await?;
+
+            Ok(crates)
+        }
+    }
+
+    /// Count crates with a specific severity level
+    ///
+    /// # Arguments
+    /// * `severity` - The severity filter ("high", "medium", "low", or "none")
+    pub async fn count_crates_by_severity(&self, severity: &str) -> Result<i64, sqlx::Error> {
+        if severity == "none" {
+            // Count crates with no findings
+            // We need to count distinct crate IDs that have no analysis results
+            let rows: Vec<(i64,)> = sqlx::query_as(
+                r#"
+                SELECT c.id
+                FROM crates c
+                LEFT JOIN versions v ON v.crate_id = c.id
+                LEFT JOIN analysis_results ar ON ar.version_id = v.id
+                GROUP BY c.id
+                HAVING COUNT(ar.id) = 0
+                "#,
+            )
+            .fetch_all(&self.pool)
+            .await?;
+
+            Ok(rows.len() as i64)
+        } else {
+            // Count crates with the specified max severity
+            let count: (i64,) = sqlx::query_as(
+                r#"
+                SELECT COUNT(*)
+                FROM (
+                    SELECT c.id
+                    FROM crates c
+                    JOIN versions v ON v.crate_id = c.id
+                    JOIN analysis_results ar ON ar.version_id = v.id
+                    GROUP BY c.id
+                    HAVING MAX(ar.severity) = ?
+                )
+                "#,
+            )
+            .bind(severity)
+            .fetch_one(&self.pool)
+            .await?;
+
+            Ok(count.0)
+        }
+    }
+
     /// Get dashboard statistics
     pub async fn get_dashboard_stats(&self) -> Result<crate::models::DashboardStats, sqlx::Error> {
         let total_crates: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM crates")
@@ -1400,6 +1549,27 @@ impl Database {
         .await?;
 
         info!("Paused crawler run_id={}", run_id);
+        Ok(())
+    }
+
+    /// Resume a paused crawler run
+    ///
+    /// # Arguments
+    /// * `run_id` - The unique identifier of the crawler run
+    pub async fn resume_crawler_run(&self, run_id: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE crawler_state
+            SET status = 'running',
+                last_checkpoint = datetime('now')
+            WHERE run_id = ?
+            "#,
+        )
+        .bind(run_id)
+        .execute(&self.pool)
+        .await?;
+
+        info!("Resumed crawler run_id={}", run_id);
         Ok(())
     }
 
