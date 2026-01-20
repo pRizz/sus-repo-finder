@@ -1,7 +1,7 @@
 //! HTML templates for the dashboard
 
 use askama::Template;
-use sus_core::{AnalysisResultRow, CrateWithStats, DashboardStats, RecentFinding, VersionWithStats};
+use sus_core::{CrateWithStats, DashboardStats, FindingStatus, FindingWithStatus, RecentFinding, VersionWithStats};
 
 /// Filter to format download counts with K/M suffixes
 pub mod filters {
@@ -78,7 +78,7 @@ pub struct CrateListTemplate {
 pub struct CrateDetailTemplate {
     pub crate_info: CrateWithStats,
     pub versions: Vec<VersionWithStats>,
-    pub findings: Vec<AnalysisResultRow>,
+    pub findings: Vec<FindingWithStatus>,
     pub selected_version: Option<String>,
 }
 

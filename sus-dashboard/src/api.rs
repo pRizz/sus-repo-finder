@@ -154,11 +154,11 @@ async fn crate_detail(
                 versions.first().map(|v| v.id)
             };
 
-            // Get findings for the selected version
+            // Get findings with comparison to previous version (shows removed patterns)
             let findings = if let Some(vid) = version_id {
                 state
                     .db
-                    .get_findings_by_version(vid)
+                    .get_findings_with_comparison(crate_info.id, vid)
                     .await
                     .unwrap_or_default()
             } else {

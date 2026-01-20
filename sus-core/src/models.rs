@@ -160,3 +160,36 @@ pub struct VersionWithStats {
     pub last_analyzed: Option<String>,
     pub finding_count: i64,
 }
+
+/// Status of a finding when comparing versions
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum FindingStatus {
+    /// Finding exists in the current version
+    Current,
+    /// Finding is new in this version (didn't exist in previous version)
+    New,
+    /// Finding was removed/fixed in this version (existed in previous version)
+    Removed,
+}
+
+/// A finding with status indicator for version comparison
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FindingWithStatus {
+    pub id: i64,
+    pub version_id: i64,
+    pub issue_type: String,
+    pub severity: String,
+    pub file_path: String,
+    pub line_start: Option<i32>,
+    pub line_end: Option<i32>,
+    pub code_snippet: Option<String>,
+    pub context_before: Option<String>,
+    pub context_after: Option<String>,
+    pub summary: Option<String>,
+    pub details: Option<String>,
+    pub created_at: String,
+    /// Status of this finding (current, new, or removed)
+    pub status: FindingStatus,
+    /// The version this finding is from (useful for removed findings)
+    pub from_version: Option<String>,
+}
