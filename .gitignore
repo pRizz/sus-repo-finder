@@ -52,3 +52,6 @@ temp/
 
 # Feature database (managed by MCP server)
 features.db
+features.db-shm
+features.db-wal
+features.db-journal
